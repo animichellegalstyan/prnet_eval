@@ -1,0 +1,11 @@
+# run "pip-compile requirements.in" to generate requirements.txt after all packages are installed
+pandas
+matplotlib
+notebook
+rdkit
+cmapPy
+pandarallel # work with LINCS
+anndata
+pydantic # work with LINCS
+pyarrow # work with LINCS
+fastparquet # wort with LINCS
