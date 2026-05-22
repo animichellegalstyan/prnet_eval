@@ -3,7 +3,8 @@
 import numpy as np
 import pandas as pd
 
-from typing import List, Optional, Union, Literal
+from collections import defaultdict
+from typing import List, Optional, Union, Literal, Annotated
 from pydantic import ConfigDict, Field, StrictStr, validate_call
 
 from rdkit import Chem, RDLogger
@@ -121,6 +122,9 @@ def are_molecules_equivalent(
 
     return can_s1 == can_s2
 
+
+SmilesList = Annotated[List[str], Field(min_length=1)]
+
 @validate_call(config=ConfigDict(arbitrary_types_allowed=True))
 def draw_molecules(
     smiles: SmilesList,
@@ -221,7 +225,7 @@ def analyze_fingerprint_collision(
         connectivity_map[non_iso].add(iso)
 
     # 5. Mixture Check
-    if len(set(s.count(".") for s in smiles_list)) > 1:
+    if len(set(s.count(".") for s in smiles_list)) > 1: 
         reasons.add("Dimer/Salt Variation")
 
     # 1. Composition/Analog Check

@@ -1,10 +1,14 @@
 # Imports -----
 
+import anndata as ad
 import pandas as pd
 import time
+import warnings
 
+from cmapPy.pandasGEXpress.parse import parse # for gctx
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, FilePath, model_validator
+from scipy import sparse
 from typing import Any, Dict, List, Optional, Union
 
 # Load metadata ----
@@ -74,8 +78,8 @@ class LINCSDataLoader(BaseModel):
     # FilePath automatically verifies that the path is a string/Path, exists, and is a file
     gctx_path: FilePath
     inst_info: pd.DataFrame
-    gene_info: Optional[pd.DataFrame] = None
-    gene_marker: Optional[Union[str, List[str]]] = None
+    gene_info: Optional[pd.DataFrame] = None    # metadata on the genes
+    gene_marker: Optional[Union[str, List[str]]] = None     #  selector for landmark/inferred/best inferred
 
     # 2. Identifiers
     comp_identifier: str = "pert_iname"
@@ -83,7 +87,7 @@ class LINCSDataLoader(BaseModel):
     instance_identifier: str = "inst_id"
 
     # 3. Computed State Variables (Populated automatically after initialization)
-    gene_rids: list = Field(default_factory=list)
+    gene_rids: list = Field(default_factory=list)   # rid = row, gene data 
     meta_df: pd.DataFrame = Field(default_factory=pd.DataFrame)
 
     # Declare the timers dictionary here
@@ -160,7 +164,7 @@ class LINCSDataLoader(BaseModel):
 
     def _load_batch(
         self, cid_list: list, rid_list: Optional[list] = None
-    ) -> tuple[dict, Any]:
+    ) -> tuple[dict, list, Any]:
         """Loads a batch of expression data from the GCTX file into a sparse matrix.
 
         This is an internal helper method. It parses the GCTX file for the specified
@@ -177,6 +181,8 @@ class LINCSDataLoader(BaseModel):
             tuple:
                 - dict: A mapping of instance IDs (strings) to their corresponding
                   row index (integer) in the generated sparse matrix.
+                - list[str]: Saves the actual order of the genes which is used for mapping 
+                  downstream. 
                 - scipy.sparse.csr_matrix: The loaded gene expression matrix, or
                   None if an error occurs during parsing.
         """
@@ -192,6 +198,8 @@ class LINCSDataLoader(BaseModel):
                 else:
                     data_obj = parse(str(self.gctx_path), cid=cid_list)
 
+                gene_order = [str(x) for x in data_obj.data_df.index]
+                
                 # 3. To DataFrame
                 temp_df = data_obj.data_df.T
 
@@ -204,16 +212,16 @@ class LINCSDataLoader(BaseModel):
                 }
 
                 # 5. Sparse Conversion
-                expression_mat = sparse.csr_matrix(temp_df.values)
+                expression_matrix = sparse.csr_matrix(temp_df.values)
 
                 # 6. Aggressive Cleanup
                 del temp_df
 
-                return inst_id_map, expression_mat
+                return inst_id_map, gene_order, expression_matrix
 
             except Exception as e:
                 print(f"Error loading batch due to error: {e}")
-                return {}, None
+                return {}, [], None
 
     def resolve_gene_rids(self, gene_filters: Dict[str, Union[Any, List[Any]]]) -> list:
         """Filters the gene metadata to extract a targeted list of gene IDs.
@@ -277,7 +285,7 @@ class LINCSDataLoader(BaseModel):
         self,
         inst_filters: Dict[str, Union[Any, List[Any]]],
         gene_filters: Optional[Dict[str, Union[Any, List[Any]]]] = None,
-    ) -> tuple[pd.DataFrame, Any]:
+    ) -> tuple[pd.DataFrame, pd.DataFrame, Any]:
         """Retrieves and aligns instance metadata with its corresponding expression data.
 
         This is the primary public interface for querying the dataset. It filters
@@ -296,7 +304,9 @@ class LINCSDataLoader(BaseModel):
 
         Returns:
             tuple:
-                - pd.DataFrame: The filtered metadata, sorted so its index rigorously
+                - pd.DataFrame: The filtered instance metadata, sorted so its index rigorously
+                  matches the row order of the expression matrix.
+                - pd.DataFrame: THe filtered gene metadata, sorted so its index rigorously
                   matches the row order of the expression matrix.
                 - scipy.sparse.csr_matrix: The aligned sparse expression matrix.
                   Returns (DataFrame, None) if the query yields empty results
@@ -335,15 +345,17 @@ class LINCSDataLoader(BaseModel):
             if not dynamic_rids:
                 print("Aborting query: Gene filters resulted in 0 genes.")
                 return query_df, None
+            else:
+                dynamic_rids = self.gene_rids
 
         # Load the data passing BOTH lists
-        inst_id_map, expression_mat = self._load_batch(cid_list, rid_list=dynamic_rids)
+        inst_id_map, actual_gene_order, expression_matrix = self._load_batch(cid_list, rid_list=dynamic_rids)
 
-        if expression_mat is None:
+        if expression_matrix is None:
             print("Warning: Expression matrix failed to load.")
-            return query_df, None
+            return query_df, pd.DataFrame(), None
 
-        # 6. Strict Matrix Alignment
+        # 6.1 Strict Matrix Alignment - instance data (rows)
         # Map the true matrix row index back to the metadata DataFrame
         query_df["_matrix_idx"] = query_df[self.instance_identifier].map(inst_id_map)
 
@@ -356,7 +368,97 @@ class LINCSDataLoader(BaseModel):
         # Reset the index for clean downstream usage
         query_df = query_df.reset_index(drop=True)
 
-        return query_df, expression_mat
+        # Strict Matrix Alignment - gene data (columns)
+        gene_df = pd.DataFrame()
+
+        if self.gene_info is not None:
+            gene_df = self.gene_info.query("gene_id in @actual_gene_order").copy()
+            
+            gene_df = gene_df.set_index("gene_id")
+            gene_df = gene_df.reindex(actual_gene_order)
+            
+            gene_df = gene_df.reset_index()
+
+        return query_df, gene_df, expression_matrix
+    
+    def create_anndata(self, 
+                       verbose: bool,
+                       comp_info_merged: pd.DataFrame,
+                       inst_filters: Dict[str, Union[Any, List[Any]]],
+                       gene_filters: Optional[Dict[str, Union[Any, List[Any]]]] = None) -> ad.AnnData:
+
+                       
+        """
+        Converts loaded objects into anndata object. obs and var attributes are 
+
+        Args:
+            verbose: Provides additional information on merge of inst and comp metadata if set to true.
+            comp_info_merged (pd.DataFrame): Compound metadata. Is merged together with the filtered
+                instance metadata to create obs dataframe.
+            inst_filters (Dict[str, Union[Any, List[Any]]]): Criteria to filter
+                the instances. Keys must match columns in `inst_info`
+                (e.g., {"pert_time": 24, "cell_iname": ["MCF7", "A549"]}).
+            gene_filters (Optional[Dict[str, Union[Any, List[Any]]]], optional):
+                Criteria to filter the genes. Keys must match valid selectors in
+                `gene_info`. Defaults to None (uses class-level gene setup).
+
+        Returns:
+            adata: ad.AnnData
+                Returns the Anndata object of the loaded data
+        """
+
+        """
+        obs: 'cell_id', 'det_plate', 'det_well', 'lincs_phase', 'pert_dose', 'pert_dose_unit', 'pert_id', 'pert_iname', 'pert_mfc_id', 'pert_time', 'pert_time_unit', 'pert_type', 'rna_plate', 'rna_well', 'condition', 'cell_type', 'dose', 'cov_drug_dose_name', 'cov_drug_name', 'control', 'canonical_smiles', 'SMILES', 'paired_control_index', 'cell_type_split_0', 'cell_type_split_1', 'cell_type_split_2', 'cell_type_split_3', 'cell_type_split_4', 'random_split_0', 'random_split_1', 'random_split_2', 'random_split_3', 'random_split_4', 'drug_split_0', 'drug_split_1', 'drug_split_2', 'drug_split_3', 'drug_split_4', 'cov_drug_dose_name_split_0', 'cov_drug_dose_name_split_1', 'cov_drug_dose_name_split_2', 'cov_drug_dose_name_split_3', 'cov_drug_dose_name_split_4'
+        var: 'pr_gene_title', 'pr_is_lm', 'pr_is_bing'
+        uns: 'cydata_pull', 'log1p'
+        """
+
+        """
+        2. Create anndata object
+        2.1 Obs
+        create attributes: cov_drug_name, cov_drug_dose_name, control
+        merge smiles via pert_id, since pert_id is not unique, here is how to proceed:
+        - pert_id's occur multiple times because their salt form, batch or similar differ.
+        - for smiles this is irrelevant, as they still have the same string since they are the same compund.
+        (Please check this first in notebook)
+        - deduplicate and ONLY map the information on the smiles strings
+        
+        """
+        filtered_inst_metadata, filtered_gene_metadata, X_data = self.get_gene_expression(
+            inst_filters=inst_filters, 
+            gene_filters=gene_filters
+            )
+        comp_info_smiles = comp_info_merged[["pert_id", "canonical_smiles"]]
+
+        # Deduplicate if there are multiple pert_id's ---
+        if comp_info_smiles.duplicated(subset="pert_id").any():
+
+            # Verify that all smiles strings are equal ---
+            smiles_per_id = comp_info_smiles.groupby("pert_id")["canonical_smiles"].nunique()
+            smiles_per_id.max()
+
+            if smiles_per_id.max() > 1:
+                warnings.warn(f"Data Integrity Warning: Found different SMILES strings for the same pert_id.")
+
+            rows_before = len(comp_info_merged)
+            comp_info_merged = comp_info_merged.drop_duplicates(subset="pert_id", keep="first")
+
+            if verbose:
+                rows_after = len(comp_info_merged)
+                print(f"A number of {rows_before-rows_after} rows have been dropped due to duplicate pert_id's.")
+
+        # Merge inst_metadata with the smiles strings from comp_metadata ---
+        merged_obs_df = pd.merge(left=filtered_inst_metadata, right=comp_info_smiles, how="left", on="pert_id")
+
+        # Build adata object ---
+        merged_obs_df = merged_obs_df.set_index(self.instance_identifier)
+        filtered_gene_metadata = filtered_gene_metadata.set_index("gene_id")  # Becomes column labels of X
+
+        adata = ad.AnnData(X=X_data, obs=merged_obs_df, var=filtered_gene_metadata)
+
+        print(f"Adata object created")
+
+        return adata
 
     def print_performance(self, restart: bool = False) -> None:
         """Prints the accumulated execution time for all registered timers.
