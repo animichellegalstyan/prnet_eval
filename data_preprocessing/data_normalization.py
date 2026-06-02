@@ -23,7 +23,7 @@ def preprocessing(clean_data: ad.AnnData) -> ad.AnnData:
         
 
 
-def data_clean_lincs(raw_data: ad.AnnData) -> ad.AnnData:
+def data_cleaning_lincs(raw_data: ad.AnnData) -> ad.AnnData:
     """
     Cleans the raw data by the criteria outlined in the PRnet paper. This function:
     - deletes insufficient compound conditions
@@ -41,4 +41,22 @@ def data_clean_lincs(raw_data: ad.AnnData) -> ad.AnnData:
             AnnData object containing the cleaned data.
     """
 
+def feature_scaling(cleaned_data: ad.AnnData) -> ad.AnnData:
+    """
+    Performs Normalization and log1p-transformation 
 
+    Parameters
+    ----------
+    cleaned_data: ad.AnnData
+            AnnData object containing the data after data cleaning.
+    
+    Returns
+    -------
+    norm_data: ad.AnnData
+            AnnData object containing the normalized and transformed data.
+    """
+
+    norm_data = sc.pp.normalize_total(cleaned_data)
+    norm_data = sc.pp.log1p(cleaned_data)
+    
+    return norm_data

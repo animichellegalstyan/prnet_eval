@@ -1,6 +1,7 @@
 # Imports -----
 
 import anndata as ad
+import h5py
 import pandas as pd
 import time
 import warnings
@@ -86,6 +87,8 @@ class LINCSDataLoader(BaseModel):
     cell_identifier: str = "cell_id"
     instance_identifier: str = "inst_id"
 
+    pert_types: Union[str, List[str]] = Field(default="trt_cp")
+
     # 3. Computed State Variables (Populated automatically after initialization)
     gene_rids: list = Field(default_factory=list)   # rid = row, gene data 
     meta_df: pd.DataFrame = Field(default_factory=pd.DataFrame)
@@ -154,8 +157,13 @@ class LINCSDataLoader(BaseModel):
 
         # Initialize metadata grouping
         print("Initializing metadata...")
+
         # "pert_type" is guaranteed to exist due to the req_inst check above
-        self.meta_df = self.inst_info[self.inst_info["pert_type"] == "trt_cp"].copy()
+        if isinstance(self.pert_types, list):
+            self.meta_df = self.inst_info[self.inst_info["pert_type"].isin(self.pert_types)].copy()
+        else:
+            self.meta_df = self.inst_info[self.inst_info["pert_type"] == self.pert_types].copy()
+
         # Initialize timers
         self.timers["io"] = Timer("io")
 
@@ -188,15 +196,33 @@ class LINCSDataLoader(BaseModel):
         """
         with self.timers["io"]:
             try:
+                # 1. Read the actual IDs physically present inside the GCTX file
+                with h5py.File(self.gctx_path, "r") as f:
+                    gctx_cols = [x.decode("utf-8") for x in f["0/META/COL/id"][:]]
+                    gctx_rows = [x.decode("utf-8") for x in f["0/META/ROW/id"][:]]
+
                 # 1. Determine target row IDs (genes)
                 # Prioritize the dynamically passed rid_list; fallback to class-level gene_rids
                 target_rids = rid_list if rid_list is not None else self.gene_rids
 
+                # 2. Filter your target lists to ONLY keep IDs that exist in the file
+                gctx_cols_set = set(gctx_cols)
+                gctx_rows_set = set(gctx_rows)
+
+                safe_sample_ids = [cid for cid in cid_list if cid in gctx_cols_set]
+                safe_gene_ids = [rid for rid in target_rids if rid in gctx_rows_set] if target_rids else []
+
+                """
+                safe_gene_ids = [rid for rid in target_rids if rid in gctx_rows] if target_rids else []
+                safe_sample_ids = [cid for cid in cid_list if cid in gctx_cols]
+                """
                 # 2. Parse GCTX
                 if target_rids:
-                    data_obj = parse(str(self.gctx_path), cid=cid_list, rid=target_rids)
+                    data_obj = parse(str(self.gctx_path), cid=safe_sample_ids, rid=safe_gene_ids)
+                    #data_obj = parse(str(self.gctx_path), cid=cid_list, rid=target_rids)
                 else:
-                    data_obj = parse(str(self.gctx_path), cid=cid_list)
+                    data_obj = parse(str(self.gctx_path), cid=safe_sample_ids)
+                    #data_obj = parse(str(self.gctx_path), cid=cid_list)
 
                 gene_order = [str(x) for x in data_obj.data_df.index]
                 
@@ -355,8 +381,10 @@ class LINCSDataLoader(BaseModel):
             print("Warning: Expression matrix failed to load.")
             return query_df, pd.DataFrame(), None
 
+        """
         # 6.1 Strict Matrix Alignment - instance data (rows)
         # Map the true matrix row index back to the metadata DataFrame
+
         query_df["_matrix_idx"] = query_df[self.instance_identifier].map(inst_id_map)
 
         # Drop any instances that the parser failed to find in the GCTX
@@ -367,6 +395,18 @@ class LINCSDataLoader(BaseModel):
 
         # Reset the index for clean downstream usage
         query_df = query_df.reset_index(drop=True)
+        """
+        # --- HIGH-PERFORMANCE ALIGNMENT --- 
+        # 1. Convert the lookup dictionary directly into a DataFrame
+        map_df = pd.DataFrame.from_dict(inst_id_map, orient="index", columns=["_matrix_idx"])
+
+        # 2. Match IDs near-instantly using the index instead of .map()
+        query_df = query_df.set_index(self.instance_identifier)
+        query_df = query_df.join(map_df, how="inner") # Dropping non-matches instantly
+
+        # 3. Sort by matrix position and recover the identifier column
+        query_df = query_df.sort_values("_matrix_idx").drop(columns=["_matrix_idx"])
+        query_df = query_df.reset_index(names=self.instance_identifier)
 
         # Strict Matrix Alignment - gene data (columns)
         gene_df = pd.DataFrame()
@@ -389,7 +429,8 @@ class LINCSDataLoader(BaseModel):
 
                        
         """
-        Converts loaded objects into anndata object. obs and var attributes are 
+        Converts loaded objects into anndata object. To form the obs dataframe, inst_metadata as well as 
+        the SMILES strings from comp_metadata have been merged together.
 
         Args:
             verbose: Provides additional information on merge of inst and comp metadata if set to true.
@@ -407,27 +448,12 @@ class LINCSDataLoader(BaseModel):
                 Returns the Anndata object of the loaded data
         """
 
-        """
-        obs: 'cell_id', 'det_plate', 'det_well', 'lincs_phase', 'pert_dose', 'pert_dose_unit', 'pert_id', 'pert_iname', 'pert_mfc_id', 'pert_time', 'pert_time_unit', 'pert_type', 'rna_plate', 'rna_well', 'condition', 'cell_type', 'dose', 'cov_drug_dose_name', 'cov_drug_name', 'control', 'canonical_smiles', 'SMILES', 'paired_control_index', 'cell_type_split_0', 'cell_type_split_1', 'cell_type_split_2', 'cell_type_split_3', 'cell_type_split_4', 'random_split_0', 'random_split_1', 'random_split_2', 'random_split_3', 'random_split_4', 'drug_split_0', 'drug_split_1', 'drug_split_2', 'drug_split_3', 'drug_split_4', 'cov_drug_dose_name_split_0', 'cov_drug_dose_name_split_1', 'cov_drug_dose_name_split_2', 'cov_drug_dose_name_split_3', 'cov_drug_dose_name_split_4'
-        var: 'pr_gene_title', 'pr_is_lm', 'pr_is_bing'
-        uns: 'cydata_pull', 'log1p'
-        """
-
-        """
-        2. Create anndata object
-        2.1 Obs
-        create attributes: cov_drug_name, cov_drug_dose_name, control
-        merge smiles via pert_id, since pert_id is not unique, here is how to proceed:
-        - pert_id's occur multiple times because their salt form, batch or similar differ.
-        - for smiles this is irrelevant, as they still have the same string since they are the same compund.
-        (Please check this first in notebook)
-        - deduplicate and ONLY map the information on the smiles strings
-        
-        """
         filtered_inst_metadata, filtered_gene_metadata, X_data = self.get_gene_expression(
             inst_filters=inst_filters, 
             gene_filters=gene_filters
             )
+        print("Done loading gene expression data.")
+
         comp_info_smiles = comp_info_merged[["pert_id", "canonical_smiles"]]
 
         # Deduplicate if there are multiple pert_id's ---
@@ -435,20 +461,37 @@ class LINCSDataLoader(BaseModel):
 
             # Verify that all smiles strings are equal ---
             smiles_per_id = comp_info_smiles.groupby("pert_id")["canonical_smiles"].nunique()
-            smiles_per_id.max()
 
             if smiles_per_id.max() > 1:
                 warnings.warn(f"Data Integrity Warning: Found different SMILES strings for the same pert_id.")
 
             rows_before = len(comp_info_merged)
-            comp_info_merged = comp_info_merged.drop_duplicates(subset="pert_id", keep="first")
+            comp_info_smiles = comp_info_smiles.drop_duplicates(subset="pert_id", keep="first")
 
             if verbose:
                 rows_after = len(comp_info_merged)
                 print(f"A number of {rows_before-rows_after} rows have been dropped due to duplicate pert_id's.")
 
+
+        
         # Merge inst_metadata with the smiles strings from comp_metadata ---
-        merged_obs_df = pd.merge(left=filtered_inst_metadata, right=comp_info_smiles, how="left", on="pert_id")
+        control = ["ctl_x", "ctl_vehicle", "ctl_untrt", "ctl_vector"] 
+
+        is_control_data = filtered_inst_metadata["pert_type"].isin(control).any()
+        if is_control_data:
+            # Use left merge so controls are kept, even if they don't have a drug SMILES
+            merged_obs_df = pd.merge(left=filtered_inst_metadata, right=comp_info_smiles, how="left", on="pert_id")
+        else:
+            # Use inner merge to drop profiles that lack actually lack clean drug structure 
+            merged_obs_df = pd.merge(left=filtered_inst_metadata, right=comp_info_smiles, how="inner", on="pert_id")
+            
+            # 2. CRITICAL: Align the sparse matrix rows to match the inner-merged rows
+            X_data = X_data[merged_obs_df.index, :]
+            
+            # 3. Reset the metadata index so it lines up perfectly with X_data from 0 to N
+            merged_obs_df = merged_obs_df.reset_index(drop=True)
+        
+        #merged_obs_df = pd.merge(left=filtered_inst_metadata, right=comp_info_smiles, how="left", on="pert_id")
 
         # Build adata object ---
         merged_obs_df = merged_obs_df.set_index(self.instance_identifier)

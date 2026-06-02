@@ -1,3 +1,6 @@
 dataset
-data_exploration.ipynb
 .DS_Store
+data_exploration_notebook.ipynb
+lincs_preproc_data_exploration.ipynb
+notebook.ipynb
+data_preprocessing/__pycache__/
