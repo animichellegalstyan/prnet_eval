@@ -381,22 +381,6 @@ class LINCSDataLoader(BaseModel):
             print("Warning: Expression matrix failed to load.")
             return query_df, pd.DataFrame(), None
 
-        """
-        # 6.1 Strict Matrix Alignment - instance data (rows)
-        # Map the true matrix row index back to the metadata DataFrame
-
-        query_df["_matrix_idx"] = query_df[self.instance_identifier].map(inst_id_map)
-
-        # Drop any instances that the parser failed to find in the GCTX
-        query_df = query_df.dropna(subset=["_matrix_idx"])
-
-        # Sort the metadata so its row order perfectly matches the sparse matrix row order
-        query_df = query_df.sort_values("_matrix_idx").drop(columns=["_matrix_idx"])
-
-        # Reset the index for clean downstream usage
-        query_df = query_df.reset_index(drop=True)
-        """
-        # --- HIGH-PERFORMANCE ALIGNMENT --- 
         # 1. Convert the lookup dictionary directly into a DataFrame
         map_df = pd.DataFrame.from_dict(inst_id_map, orient="index", columns=["_matrix_idx"])
 
@@ -429,15 +413,21 @@ class LINCSDataLoader(BaseModel):
 
                        
         """
-        Converts loaded objects into anndata object. To form the obs dataframe, inst_metadata as well as 
-        the SMILES strings from comp_metadata have been merged together.
+        Loads expression data and filters the instance -and gene metadata with the use of get_gene_expression.
+        These are then used to build the anndata object. For the observables dataframe, the smiles string in comp_info_merged
+        were merged with the instance metadata via pert_id. 
+
+        This function assumes that the only information needed from comp_info_merged for downstream use 
+        are the canonical_smiles. If this is not the case, add more attributes to comp_info_smiles and check 
+        if any unique pert_id maps to more than one unique attribute value.
 
         Args:
-            verbose: Provides additional information on merge of inst and comp metadata if set to true.
-            comp_info_merged (pd.DataFrame): Compound metadata. Is merged together with the filtered
-                instance metadata to create obs dataframe.
+            verbose: Provides additional information on how many duplicate pert_id's have been dropped
+                from comp_info_smiles if set to true.
+            comp_info_merged (pd.DataFrame): Compound metadata. It provides the smiles string to map
+                to the pert_id's. 
             inst_filters (Dict[str, Union[Any, List[Any]]]): Criteria to filter
-                the instances. Keys must match columns in `inst_info`
+                the instance metadata. Keys must match columns in `inst_info`
                 (e.g., {"pert_time": 24, "cell_iname": ["MCF7", "A549"]}).
             gene_filters (Optional[Dict[str, Union[Any, List[Any]]]], optional):
                 Criteria to filter the genes. Keys must match valid selectors in
@@ -448,18 +438,21 @@ class LINCSDataLoader(BaseModel):
                 Returns the Anndata object of the loaded data
         """
 
+        # Load expression data and filter the instance -and gene metadata
         filtered_inst_metadata, filtered_gene_metadata, X_data = self.get_gene_expression(
             inst_filters=inst_filters, 
             gene_filters=gene_filters
             )
-        print("Done loading gene expression data.")
 
+        # Build the observables Dataframe
+
+        # 1. Subset comp_info_merge to contain pert_id's and their corresponding smiles
         comp_info_smiles = comp_info_merged[["pert_id", "canonical_smiles"]]
 
-        # Deduplicate if there are multiple pert_id's ---
+        # 2. If there are multiple pert_id's, deduplicate
         if comp_info_smiles.duplicated(subset="pert_id").any():
 
-            # Verify that all smiles strings are equal ---
+            # Verify that no unique pert_id maps to different smiles strings. Mapping won't work otherwise.
             smiles_per_id = comp_info_smiles.groupby("pert_id")["canonical_smiles"].nunique()
 
             if smiles_per_id.max() > 1:
@@ -474,28 +467,29 @@ class LINCSDataLoader(BaseModel):
 
 
         
-        # Merge inst_metadata with the smiles strings from comp_metadata ---
-        control = ["ctl_x", "ctl_vehicle", "ctl_untrt", "ctl_vector"] 
+        # 3. Merge the smiles strings from comp_info_smiles with the instance metadata to form the observables
+        
+        #control = ["ctl_x", "ctl_vehicle", "ctl_untrt", "ctl_vector"] 
 
-        is_control_data = filtered_inst_metadata["pert_type"].isin(control).any()
-        if is_control_data:
-            # Use left merge so controls are kept, even if they don't have a drug SMILES
+        is_control_data = filtered_inst_metadata[filtered_inst_metadata['control'] == 1]
+        if not is_control_data.empty:
+            # Use left merge to keep control data, even if they don't have smiles 
             merged_obs_df = pd.merge(left=filtered_inst_metadata, right=comp_info_smiles, how="left", on="pert_id")
         else:
-            # Use inner merge to drop profiles that lack actually lack clean drug structure 
+            # Use inner merge to drop profiles that actually lack smiles strings. (Due to comp_info_merged not storing them)
             merged_obs_df = pd.merge(left=filtered_inst_metadata, right=comp_info_smiles, how="inner", on="pert_id")
             
-            # 2. CRITICAL: Align the sparse matrix rows to match the inner-merged rows
+            # Realign expression data to obs after dropping rows from obs due to inner merge
             X_data = X_data[merged_obs_df.index, :]
             
-            # 3. Reset the metadata index so it lines up perfectly with X_data from 0 to N
+            # Reset the metadata index after it got fragmented from inner merge
             merged_obs_df = merged_obs_df.reset_index(drop=True)
         
         #merged_obs_df = pd.merge(left=filtered_inst_metadata, right=comp_info_smiles, how="left", on="pert_id")
 
-        # Build adata object ---
+        # Build adata object 
         merged_obs_df = merged_obs_df.set_index(self.instance_identifier)
-        filtered_gene_metadata = filtered_gene_metadata.set_index("gene_id")  # Becomes column labels of X
+        filtered_gene_metadata = filtered_gene_metadata.set_index("gene_id")  
 
         adata = ad.AnnData(X=X_data, obs=merged_obs_df, var=filtered_gene_metadata)
 
