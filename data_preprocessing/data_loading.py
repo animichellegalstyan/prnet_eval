@@ -488,7 +488,7 @@ class LINCSDataLoader(BaseModel):
         #merged_obs_df = pd.merge(left=filtered_inst_metadata, right=comp_info_smiles, how="left", on="pert_id")
 
         # Build adata object 
-        merged_obs_df = merged_obs_df.set_index(self.instance_identifier)
+        merged_obs_df = merged_obs_df.set_index(self.instance_identifier) # the index is now the sample_id
         filtered_gene_metadata = filtered_gene_metadata.set_index("gene_id")  
 
         adata = ad.AnnData(X=X_data, obs=merged_obs_df, var=filtered_gene_metadata)
