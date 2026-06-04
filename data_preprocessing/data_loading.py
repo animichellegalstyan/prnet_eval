@@ -196,51 +196,44 @@ class LINCSDataLoader(BaseModel):
         """
         with self.timers["io"]:
             try:
-                # 1. Read the actual IDs physically present inside the GCTX file
+                # Get sample -and gene ID's
                 with h5py.File(self.gctx_path, "r") as f:
                     gctx_cols = [x.decode("utf-8") for x in f["0/META/COL/id"][:]]
                     gctx_rows = [x.decode("utf-8") for x in f["0/META/ROW/id"][:]]
 
-                # 1. Determine target row IDs (genes)
-                # Prioritize the dynamically passed rid_list; fallback to class-level gene_rids
+                # Determine target row IDs (genes)
                 target_rids = rid_list if rid_list is not None else self.gene_rids
 
-                # 2. Filter your target lists to ONLY keep IDs that exist in the file
+                # Filter target lists to only keep IDs that exist in the file
                 gctx_cols_set = set(gctx_cols)
                 gctx_rows_set = set(gctx_rows)
 
                 safe_sample_ids = [cid for cid in cid_list if cid in gctx_cols_set]
                 safe_gene_ids = [rid for rid in target_rids if rid in gctx_rows_set] if target_rids else []
 
-                """
-                safe_gene_ids = [rid for rid in target_rids if rid in gctx_rows] if target_rids else []
-                safe_sample_ids = [cid for cid in cid_list if cid in gctx_cols]
-                """
-                # 2. Parse GCTX
+                # Parse GCTX
                 if target_rids:
                     data_obj = parse(str(self.gctx_path), cid=safe_sample_ids, rid=safe_gene_ids)
-                    #data_obj = parse(str(self.gctx_path), cid=cid_list, rid=target_rids)
                 else:
                     data_obj = parse(str(self.gctx_path), cid=safe_sample_ids)
-                    #data_obj = parse(str(self.gctx_path), cid=cid_list)
 
                 gene_order = [str(x) for x in data_obj.data_df.index]
                 
-                # 3. To DataFrame
+                # Convert to df
                 temp_df = data_obj.data_df.T
 
                 # Clean up the raw object early to save memory
                 del data_obj
 
-                # 4. Create ID map
+                # Create ID map
                 inst_id_map = {
                     rid: i for i, rid in enumerate(temp_df.index.astype(str))
                 }
 
-                # 5. Sparse Conversion
+                # Sparse Conversion
                 expression_matrix = sparse.csr_matrix(temp_df.values)
 
-                # 6. Aggressive Cleanup
+                # Aggressive Cleanup
                 del temp_df
 
                 return inst_id_map, gene_order, expression_matrix
@@ -338,10 +331,9 @@ class LINCSDataLoader(BaseModel):
                   Returns (DataFrame, None) if the query yields empty results
                   or fails to parse.
         """
-        # 1. Start with all valid metadata
         query_df = self.meta_df.copy()
 
-        # 2. Iteratively apply filters
+        # Filter the metadata
         for col, value in inst_filters.items():
             if col not in query_df.columns:
                 print(
@@ -349,50 +341,43 @@ class LINCSDataLoader(BaseModel):
                 )
                 continue
 
-            # Coerce scalar values to lists for uniform .isin() usage
             if not isinstance(value, (list, tuple, set)):
                 value = [value]
 
             query_df = query_df[query_df[col].isin(value)]
 
-        # 3. Handle empty queries
         if query_df.empty:
             print("No instances found matching the provided filters.")
-            # Return empty DataFrame and None to prevent downstream crashes
             return query_df, None
 
-        # 4. Extract the instance IDs (cids) for the GCTX parser
+        # Extract the instance IDs (cids) for the GCTX parser
         cid_list = query_df[self.instance_identifier].tolist()
 
-        # Resolve dynamic genes if filters are provided
+        # Extract gene ID's (rids) for GCTX parser
         dynamic_rids = None
         if gene_filters:
             dynamic_rids = self.resolve_gene_rids(gene_filters)
             if not dynamic_rids:
                 print("Aborting query: Gene filters resulted in 0 genes.")
                 return query_df, None
-            else:
-                dynamic_rids = self.gene_rids
 
-        # Load the data passing BOTH lists
+        # Load the data 
         inst_id_map, actual_gene_order, expression_matrix = self._load_batch(cid_list, rid_list=dynamic_rids)
 
         if expression_matrix is None:
             print("Warning: Expression matrix failed to load.")
             return query_df, pd.DataFrame(), None
 
-        # 1. Convert the lookup dictionary directly into a DataFrame
-        map_df = pd.DataFrame.from_dict(inst_id_map, orient="index", columns=["_matrix_idx"])
+        # Reorganize metadata to match expression matrix after loading
 
-        # 2. Match IDs near-instantly using the index instead of .map()
+        sampleID_to_XID_map_df = pd.DataFrame.from_dict(inst_id_map, orient="index", columns=["expression_matrix_index"])
+
         query_df = query_df.set_index(self.instance_identifier)
-        query_df = query_df.join(map_df, how="inner") # Dropping non-matches instantly
+        query_df = query_df.join(sampleID_to_XID_map_df, how="inner") # Dropping non-matches instantly
 
-        # 3. Sort by matrix position and recover the identifier column
-        query_df = query_df.sort_values("_matrix_idx").drop(columns=["_matrix_idx"])
+        query_df = query_df.sort_values("expression_matrix_index").drop(columns=["expression_matrix_index"])
         query_df = query_df.reset_index(names=self.instance_identifier)
 
-        # Strict Matrix Alignment - gene data (columns)
         gene_df = pd.DataFrame()
 
         if self.gene_info is not None:
