@@ -432,16 +432,22 @@ class LINCSDataLoader(BaseModel):
         # Build the observables Dataframe
 
         # 1. Subset comp_info_merge to contain pert_id's and their corresponding smiles
-        comp_info_smiles = comp_info_merged[["pert_id", "canonical_smiles"]]
+        comp_info_smiles = comp_info_merged[["pert_id", "canonical_smiles", "fingerprint_smiles"]]
 
         # 2. If there are multiple pert_id's, deduplicate
         if comp_info_smiles.duplicated(subset="pert_id").any():
 
-            # Verify that no unique pert_id maps to different smiles strings. Mapping won't work otherwise.
+            # Verify that no unique pert_id maps to different smiles strings/fingerprints. Mapping won't work otherwise.
             smiles_per_id = comp_info_smiles.groupby("pert_id")["canonical_smiles"].nunique()
 
             if smiles_per_id.max() > 1:
                 warnings.warn(f"Data Integrity Warning: Found different SMILES strings for the same pert_id.")
+            
+            fingerprint_per_id = comp_info_smiles.groupby("pert_id")["fingerprint_smiles"].nunique()
+
+            if fingerprint_per_id.max() > 1:
+                warnings.warn(f"Data Integrity Warning: Found different Fingerprints for the same pert_id.")
+            
 
             rows_before = len(comp_info_merged)
             comp_info_smiles = comp_info_smiles.drop_duplicates(subset="pert_id", keep="first")

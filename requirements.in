@@ -10,3 +10,4 @@ pydantic # work with LINCS
 pyarrow # work with LINCS
 fastparquet # wort with LINCS
 scanpy
+pytest # unit testing 
