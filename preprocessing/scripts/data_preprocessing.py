@@ -2,8 +2,10 @@ import anndata as ad
 import pandas as pd
 import scanpy as sc
 
-from data_preprocessing.scripts.inspect_fingerprints import get_fingerprint
+from preprocessing.scripts.inspect_fingerprints import get_fingerprint
 from pathlib import Path
+from pandarallel import pandarallel
+
 
 
 def preprocessing(comp_metadata_clean: pd.DataFrame, inst_metadata_clean: pd.DataFrame) -> ad.AnnData:
@@ -67,7 +69,7 @@ def data_cleaning(comp_metadata: pd.DataFrame,
 
     return comp_metadata_clean, inst_metadata_clean
 
-def add_fingerprints(comp_metadata: pd.DataFrame, comp_metadata_path: Path, verbose: bool) -> pd.DataFrame:
+def add_fingerprints(comp_metadata: pd.DataFrame, verbose: bool) -> pd.DataFrame:
     """
     Assumes fingerprints have not been generated or need to be generated again 
     (compounds_info_fingerprints.parquet does not exist or is deprecated).
@@ -75,6 +77,8 @@ def add_fingerprints(comp_metadata: pd.DataFrame, comp_metadata_path: Path, verb
     Deletes rows where SMILES strings are undefined.
     Generates Fingerprints using get_fingerprint from inspect_fingerprints.py and adds them to comp_metadata.
     Deletes rows where Fingerprints are undefined. 
+
+    Saving to parquet with nextflow script
 
     Parameters
     ----------
@@ -97,10 +101,10 @@ def add_fingerprints(comp_metadata: pd.DataFrame, comp_metadata_path: Path, verb
     nrows_after = comp_metadata.shape[0]
 
     # Generate fingerprints
-    comp_metadata["Fingerprint_smiles"] = comp_metadata["canonical_smiles"].parallel_apply(get_fingerprint)
+    comp_metadata["fingerprint_smiles"] = comp_metadata["canonical_smiles"].parallel_apply(get_fingerprint)
 
     # Save metdata to Parquet
-    comp_metadata.to_parquet(comp_metadata_path, index=False)
+    # comp_metadata.to_parquet(comp_metadata_path, index=False)
 
     # delete na's in fingerprint_smiles column
     comp_metadata = comp_metadata.dropna(subset=['fingerprint_smiles'])
@@ -168,6 +172,7 @@ def del_insufficient_comp(inst_metadata: pd.DataFrame, verbose: bool) -> pd.Data
 
     observations_count_df = inst_metadata.groupby('cov_drug_dose_name').size()
     nrows_obs_before = observations_count_df.shape[0]
+    #print(observations_count_df)
 
     observations_count_df = observations_count_df.loc[observations_count_df >= 5]
     nrows_obs_after = observations_count_df.shape[0]
@@ -183,7 +188,7 @@ def del_insufficient_comp(inst_metadata: pd.DataFrame, verbose: bool) -> pd.Data
 
     inst_metadata = inst_metadata[inst_metadata['cov_drug_dose_name'].isin(observations_count_df.index)].copy()
 
-    return inst_metadata
+    return inst_metadata.reset_index(drop=True)
 
 def pair_observations(inst_metadata: pd.DataFrame, verbose: bool) -> pd.DataFrame:
     """
@@ -215,20 +220,21 @@ def pair_observations(inst_metadata: pd.DataFrame, verbose: bool) -> pd.DataFram
             control_idx = None  
             print(f"Warning: No control found for cell type: {cell_type}")
     
-    inst_metadata.loc[(inst_metadata.cell_type == cell_type), 'paired_control_index'] = control_idx
+        inst_metadata.loc[(inst_metadata.cell_type == cell_type), 'paired_control_index'] = control_idx
 
     # Delete unpaired observations
 
-    nrows_paired_before = inst_info_merged.shape[0]
+    nrows_paired_before = inst_metadata.shape[0]
 
-    is_treatment = inst_info_merged['pert_type'] == "trt_cp"
-    is_na_index = inst_info_merged['paired_control_index'].isna()
+    is_treatment = inst_metadata['control'] == 0
+    is_na_index = inst_metadata['paired_control_index'].isna()
 
-    inst_info_merged = inst_info_merged[~(is_treatment & is_na_index)]
+    inst_metadata = inst_metadata[~(is_treatment & is_na_index)]
 
-    nrows_paired_after = inst_info_merged.shape[0]
+    nrows_paired_after = inst_metadata.shape[0]
 
     if verbose:
         print(f"{nrows_paired_before-nrows_paired_after} number of observations left unpaired and removed.")
 
     return inst_metadata
+

@@ -1,0 +1,2 @@
+[tool.pytest.ini_options]
+pythonpath = ["/Users/ani/Thesis/prnet_eval"]
