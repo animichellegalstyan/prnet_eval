@@ -5,4 +5,5 @@ data_exploration_notebook.ipynb
 lincs_preproc_data_exploration.ipynb
 notebook.ipynb
 preprocessing/scripts/__pycache__/
-preprocessing/__pycache__/
+**/__pycache__/
+*.pyc

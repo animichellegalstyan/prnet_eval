@@ -6,7 +6,7 @@ from preprocessing.scripts.data_preprocessing import add_fingerprints, adapt_col
 
 # Datasets used for testing ----
 sample_fingerprints_df = pd.DataFrame({
-    "canonical_smiles": ["CCNC(=O)CCC(N)C(O)=O", "NC(CCCNC(N)=O)C(O)=O", None, "restricted"]
+    "canonical_smiles": ["CCNC(=O)CCC(N)C(O)=O", None, "NC(CCCNC(N)=O)C(O)=O", "restricted"]
 })
 
 sample_adapt_cols_df = pd.DataFrame({
@@ -23,9 +23,9 @@ sample_del_comp_df = pd.DataFrame({
 })
 
 sample_pair_obs_df = pd.DataFrame({
-    "cell_type": ["A549", "A549", "MCF7", "MCF7", "PC3"],
-    "control": [0, 1, 0, 1, 0],
-    "sample_id": ["EMU001_TMD8_3H_X1_B39:A22", "AICHI002_THP1_4H_X3_B39:C22", "ERG013_PC3_72H_X1_B11:D16", "HSF044_HEK293T_48H_X1_B12:H01", "HSF038_HEK293T_48H_X2_B12:M01"]
+    "cell_type": ["A549", "A549", "PC3","MCF7", "MCF7"],
+    "control": [0, 1, 0, 0, 1],
+    "sample_id": ["EMU001_TMD8_3H_X1_B39:A22", "AICHI002_THP1_4H_X3_B39:C22", "HSF038_HEK293T_48H_X2_B12:M01", "ERG013_PC3_72H_X1_B11:D16", "HSF044_HEK293T_48H_X1_B12:H01"]
 })
 
 # Deactivating Parallelization for unit test test_add_fingerprint to strictly test logic. Use preprocessing_notebook to test parallelization ----
@@ -37,7 +37,7 @@ def test_add_fingerprints():
 
     result = add_fingerprints(sample_fingerprints_df, verbose=False)
 
-    result_smiles = result[["canonical_smiles"]].reset_index(drop=True)
+    result_smiles = result[["canonical_smiles"]]
 
     expectation = pd.DataFrame({
         "canonical_smiles": ["CCNC(=O)CCC(N)C(O)=O", "NC(CCCNC(N)=O)C(O)=O"]

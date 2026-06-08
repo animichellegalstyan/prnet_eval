@@ -97,7 +97,7 @@ def add_fingerprints(comp_metadata: pd.DataFrame, verbose: bool) -> pd.DataFrame
 
     # Delete na's in canonical_smiles column
     nrows_before = comp_metadata.shape[0]
-    comp_metadata = comp_metadata.dropna(subset=['canonical_smiles'])
+    comp_metadata = comp_metadata.dropna(subset=['canonical_smiles'])    
     nrows_after = comp_metadata.shape[0]
 
     # Generate fingerprints
@@ -115,7 +115,7 @@ def add_fingerprints(comp_metadata: pd.DataFrame, verbose: bool) -> pd.DataFrame
         print(f"{nrows_before-nrows_after} rows were deleted due to invalid SMILES.")
         print(f"{nrows_after - nrows_after2} rows remained unparsed by RDKit and deleted.")
 
-    return comp_metadata
+    return comp_metadata.reset_index(drop=True)
 
 def adapt_cols_to_prnet(inst_metadata: pd.DataFrame) -> pd.DataFrame:
     """
@@ -236,5 +236,5 @@ def pair_observations(inst_metadata: pd.DataFrame, verbose: bool) -> pd.DataFram
     if verbose:
         print(f"{nrows_paired_before-nrows_paired_after} number of observations left unpaired and removed.")
 
-    return inst_metadata
+    return inst_metadata.reset_index(drop=True)
 
