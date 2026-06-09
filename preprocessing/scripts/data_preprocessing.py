@@ -172,7 +172,6 @@ def del_insufficient_comp(inst_metadata: pd.DataFrame, verbose: bool) -> pd.Data
 
     observations_count_df = inst_metadata.groupby('cov_drug_dose_name').size()
     nrows_obs_before = observations_count_df.shape[0]
-    #print(observations_count_df)
 
     observations_count_df = observations_count_df.loc[observations_count_df >= 5]
     nrows_obs_after = observations_count_df.shape[0]
