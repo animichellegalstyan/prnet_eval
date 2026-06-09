@@ -1,0 +1,73 @@
+import anndata as ad
+
+from enum import Enum
+from sklearn.model_selection import GroupShuffleSplit, GroupKFold
+
+class SplittingStrategy(Enum):
+    COMPOUND_SPLIT_SMILES = "canonical_smiles"
+    COMPOUND_SPLIT_PERT_ID = "pert_id"  # just in case they actually split via pert_id
+    EMBEDDING_SPLIT = "fingerprint_smiles"
+
+split_setting = SplittingStrategy.COMPOUND_SPLIT_SMILES
+
+def split_train_test_val(comp_adata: ad.AnnData, 
+                         verbose: bool) -> tuple[ad.AnnData, ad.AnnData, ad.AnnData]:
+    # Split into train / test / val
+    train_ratio = 0.6
+    validation_ratio = 0.2
+
+    gss1 = GroupShuffleSplit(n_splits=1, train_size=train_ratio+validation_ratio, random_state=42)
+    gss2 = GroupShuffleSplit(n_splits=1, train_size=train_ratio/(train_ratio+validation_ratio), random_state=42)
+
+    train_and_val_set, test_set = next(gss1.split(comp_adata, groups=comp_adata.obs[split_setting]))
+
+    adata_train_val = comp_adata[train_and_val_set].copy()
+    adata_test = comp_adata[test_set].copy()
+
+    train_set, val_set = next(gss2.split(adata_train_val, groups=adata_train_val.obs[split_setting]))
+
+
+    adata_train = comp_adata[train_set].copy()
+    adata_val = comp_adata[val_set].copy()
+
+    if verbose:
+        print("Training set: ", train_set.size)
+        print("Validation set: ", val_set.size)
+        print("Testing set: ", test_set.size)
+    
+    return adata_train, adata_val, adata_test
+
+def split_folds(adata_train: ad.AnnData, verbose: bool) -> ad.AnnData:
+
+    group_5fold_1 = GroupKFold(n_splits=5)
+    group_5fold_2 = GroupShuffleSplit(n_splits=1, train_size=0.75, random_state=42)
+
+    main_groups = adata_train.obs["canonical_smiles"]
+
+    for fold, (train_and_val_folds, test_folds) in enumerate(
+    group_5fold_1.split(adata_train, groups=main_groups)
+    ):
+        column_name = f"drug_split_{fold}"
+
+        adata_train.obs[column_name] = "train"
+
+        adata_train.obs.iloc[test_folds, adata_train.obs.columns.get_loc(column_name)] = "test"
+
+        adata_train_val_folds = adata_train[train_and_val_folds]
+
+        _, val_folds_subset_idx = next(
+            group_5fold_2.split(adata_train_val_folds, groups=adata_train_val_folds.obs["canonical_smiles"])
+        )
+
+        # Map the relative validation positions back to the global index space
+        global_val_folds = train_and_val_folds[val_folds_subset_idx]
+
+        # Assign 'valid' to those global validation rows
+        adata_train.obs.iloc[global_val_folds, adata_train.obs.columns.get_loc(column_name)] = "valid"
+
+    if verbose:
+        for i in range(5):
+            print(f"\n--- Distribution for drug_split_{i} ---")
+            print(adata_train.obs[f"drug_split_{i}"].value_counts())
+    
+    return adata_train
