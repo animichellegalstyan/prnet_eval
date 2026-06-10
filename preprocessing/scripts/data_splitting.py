@@ -1,34 +1,37 @@
 import anndata as ad
 
-from enum import Enum
+from enum import StrEnum
 from sklearn.model_selection import GroupShuffleSplit, GroupKFold
 
-class SplittingStrategy(Enum):
+class SplittingStrategy(StrEnum):
     COMPOUND_SPLIT_SMILES = "canonical_smiles"
     COMPOUND_SPLIT_PERT_ID = "pert_id"  # just in case they actually split via pert_id
     EMBEDDING_SPLIT = "fingerprint_smiles"
 
-split_setting = SplittingStrategy.COMPOUND_SPLIT_SMILES
+# split_strat is set in python script for now, later will make it selectable from the command line. 
+Split_Setting = str(SplittingStrategy.COMPOUND_SPLIT_SMILES)
 
-def split_train_test_val(comp_adata: ad.AnnData, 
-                         verbose: bool) -> tuple[ad.AnnData, ad.AnnData, ad.AnnData]:
+def split_data(comp_adata: ad.AnnData, verbose: bool) -> tuple[ad.AnnData, ad.AnnData, ad.AnnData]:
     # Split into train / test / val
     train_ratio = 0.6
     validation_ratio = 0.2
 
     gss1 = GroupShuffleSplit(n_splits=1, train_size=train_ratio+validation_ratio, random_state=42)
-    gss2 = GroupShuffleSplit(n_splits=1, train_size=train_ratio/(train_ratio+validation_ratio), random_state=42)
+    gss2 = GroupShuffleSplit(n_splits=1, train_size=train_ratio/(train_ratio+validation_ratio), random_state=41)
 
-    train_and_val_set, test_set = next(gss1.split(comp_adata, groups=comp_adata.obs[split_setting]))
+    train_and_val_set, test_set = next(gss1.split(comp_adata, groups=comp_adata.obs[Split_Setting]))
 
-    adata_train_val = comp_adata[train_and_val_set].copy()
-    adata_test = comp_adata[test_set].copy()
+    adata_train_val = comp_adata[comp_adata.obs_names[train_and_val_set]].copy()
+    adata_test = comp_adata[comp_adata.obs_names[test_set]].copy()
 
-    train_set, val_set = next(gss2.split(adata_train_val, groups=adata_train_val.obs[split_setting]))
+    train_set, val_set = next(gss2.split(adata_train_val, groups=adata_train_val.obs[Split_Setting]))
+
+    train_ids = adata_train_val.obs_names[train_set]
+    valid_ids = adata_train_val.obs_names[val_set]
 
 
-    adata_train = comp_adata[train_set].copy()
-    adata_val = comp_adata[val_set].copy()
+    adata_train = comp_adata[train_ids].copy()
+    adata_val = comp_adata[valid_ids].copy()
 
     if verbose:
         print("Training set: ", train_set.size)
@@ -42,7 +45,7 @@ def split_folds(adata_train: ad.AnnData, verbose: bool) -> ad.AnnData:
     group_5fold_1 = GroupKFold(n_splits=5)
     group_5fold_2 = GroupShuffleSplit(n_splits=1, train_size=0.75, random_state=42)
 
-    main_groups = adata_train.obs["canonical_smiles"]
+    main_groups = adata_train.obs[Split_Setting]
 
     for fold, (train_and_val_folds, test_folds) in enumerate(
     group_5fold_1.split(adata_train, groups=main_groups)
