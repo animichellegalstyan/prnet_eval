@@ -2,7 +2,9 @@
 
 import anndata as ad
 import h5py
+import os
 import pandas as pd
+import sys
 import time
 import warnings
 
@@ -34,7 +36,65 @@ def load_metadata_txt(file_path: Path, delimiter="\t") -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     return df
 
-# Load GE from LINCS datasets ----
+def load_lincs_meta(metadata_folder_path: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+
+    metadata_folder_path = Path(metadata_folder_path)
+
+    comp_info_merged = load_metadata_txt(metadata_folder_path / "compoundinfo_beta.txt")
+    gene_info_merged = load_metadata_txt(metadata_folder_path / "geneinfo_beta.txt")
+    inst_info_merged = load_metadata_txt(metadata_folder_path / "instinfo_beta.txt")
+
+    return comp_info_merged, gene_info_merged, inst_info_merged
+
+# Load GE from LINCS and make into anndata object ----
+def load_ge(inst_metadata: pd.DataFrame,
+            comp_metadata: pd.DataFrame,
+            gene_metadata: pd.DataFrame,
+            gctx_cp_path: Path,
+            gctx_ctl_path: Path) -> ad.AnnData:
+    
+    # Subset metadata into control and compound
+    inst_info_merged_control = inst_metadata[inst_metadata["control"] == 1]
+    inst_info_merged_comp = inst_metadata[inst_metadata["pert_type"] == "trt_cp"]
+
+    # Inistantiate the dataloaders
+    dataloader_cp = LINCSDataLoader(
+        gctx_path=gctx_cp_path,
+        inst_info=inst_info_merged_comp,
+        gene_info=gene_metadata,
+        gene_marker="landmark",
+        comp_identifier="pert_id",  
+        cell_identifier="cell_type",
+        instance_identifier="sample_id",
+    )
+
+    control_types = ["ctl_x", "ctl_vehicle", "ctl_untrt", "ctl_vector"] 
+    dataloader_ctl = LINCSDataLoader(
+        gctx_path=gctx_ctl_path,
+        inst_info=inst_info_merged_control,
+        gene_info=gene_metadata,
+        gene_marker="landmark",
+        comp_identifier="pert_id",
+        cell_identifier="cell_type",
+        instance_identifier="sample_id",
+        pert_types=control_types,
+    )
+
+    inst_filters_ctl = {}
+    inst_filters_comp = {}
+
+    gene_filters_ctl = {}
+    gene_filters_comp = {}
+
+    lincs_adata_ctl = dataloader_ctl.create_anndata(False, comp_metadata, inst_filters_ctl)
+    lincs_adata_cp = dataloader_cp.create_anndata(False, comp_metadata, inst_filters_comp)
+
+    lincs_adata = ad.concat([lincs_adata_ctl, lincs_adata_cp], axis='obs', join='outer', merge='same')
+
+    return lincs_adata
+
+
+# Class to help load GE from LINCS datasets ----
 
 class Timer:
     def __init__(self, name: str):
@@ -510,3 +570,68 @@ class LINCSDataLoader(BaseModel):
             else:
                 print(timer)
         print("--------------------------\n")
+
+
+if __name__ == "__main__":
+    task = sys.argv[1]
+
+    if task == "load_comp":
+        metadata_file = Path(sys.argv[2]) 
+
+        comp_meta = load_metadata_txt(metadata_file)
+        comp_meta.to_parquet("comp_metadata.parquet", index=False)
+
+    elif task == "load_inst":
+        metadata_file = Path(sys.argv[2])  
+
+        inst_meta = load_metadata_txt(metadata_file)
+        inst_meta.to_parquet("inst_metadata.parquet", index=False)
+
+    elif task == "process_expression":
+
+        # Input ----
+        comp_file = Path(sys.argv[2])  
+        inst_file = Path(sys.argv[3])   
+        gene_file = Path(sys.argv[4])   
+        gctx_cp   = Path(sys.argv[5])   
+        gctx_ctl  = Path(sys.argv[6])   
+        
+        df_comp = pd.read_parquet(comp_file)
+        df_inst = pd.read_parquet(inst_file)
+        
+        df_gene = load_metadata_txt(gene_file)
+
+        # Loading GE Data ----
+        print("Compiling AnnData via LINCSDataLoader...")
+        lincs_adata = load_ge(
+            inst_metadata=df_inst, 
+            comp_metadata=df_comp, 
+            gene_metadata=df_gene, 
+            gctx_cp_path=str(gctx_cp), 
+            gctx_ctl_path=str(gctx_ctl)
+        )
+
+        # Check size of loaded and filtered expression data ----
+
+        matrix_bytes = lincs_adata.X.nbytes if hasattr(lincs_adata.X, 'nbytes') else 0
+        if matrix_bytes == 0 and hasattr(lincs_adata.X, 'data'): # If it's a sparse matrix
+            matrix_bytes = lincs_adata.X.data.nbytes + lincs_adata.X.indices.nbytes + lincs_adata.X.indptr.nbytes
+            
+        obs_bytes = lincs_adata.obs.memory_usage(deep=True).sum()
+        var_bytes = lincs_adata.var.memory_usage(deep=True).sum()
+        
+        total_gigabytes = (matrix_bytes + obs_bytes + var_bytes) / (1024 ** 3)
+        
+        print("\n" + "="*50)
+        print(f"DRY RUN COMPLETE: Preprocessing and filtering successfully finished.")
+        print(f"Estimated size of the final compiled AnnData object: {total_gigabytes:.2f} GB")
+        print("="*50 + "\n")
+        
+        # Output ----
+        lincs_adata.write("loaded_dataset.h5ad", compression="gzip")
+
+        del lincs_adata # delete from memory to save space
+        
+    else:
+        print(f"Error: Unknown task '{task}'", file=sys.stderr)
+        sys.exit(1)

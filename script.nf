@@ -1,58 +1,60 @@
 #!/usr/bin/env nextflow
 
 // Include modules
-include { sayHello } from './modules/sayHello.nf'
-include { convertToUpper } from './modules/convertToUpper.nf'
-include { collectGreetings } from './modules/collectGreetings.nf'
-include { cowpy } from './modules/cowpy.nf'
+include { loadCompoundMetadata; loadInstanceMetadata; addFingerprints; preprocessMetadata; loadExpressionData } from './modules/preprocessLincs.nf'
 
 /*
- * Pipeline parameters
+ * Pipeline Parameters
  */
-params {
-    input: Path
-    batch: String
-    character: String
-}
+params.batch                = "batch_run_00"
+params.metadata_folder_path = '/Users/ani/Thesis/prnet_eval/dataset/metadata/LINCS'
+params.gctx_cp_path         = '/Users/ani/Thesis/prnet_eval/dataset/data/LINCS/level3_beta_trt_cp_n1805898x12328.gctx'
+params.gctx_ctl_path        = '/Users/ani/Thesis/prnet_eval/dataset/data/LINCS/level3_beta_ctl_n188708x12328.gctx' 
 
 workflow {
 
     main:
-    // create a channel for inputs from a CSV file
-    greeting_ch = channel.fromPath(params.input)
-                        .splitCsv()
-                        .map { line -> line[0] }
-    // emit a greeting
-    sayHello(greeting_ch)
-    // convert the greeting to uppercase
-    convertToUpper(sayHello.out)
-    // collect all the greetings into one file
-    collectGreetings(convertToUpper.out.collect(), params.batch)
-    // generate ASCII art of the greetings with cowpy
-    cowpy(collectGreetings.out.outfile, params.character)
+
+    // 1. Initialize our entry-point data channels natively
+    comp_file_ch   = channel.fromPath("${params.metadata_folder_path}/compoundinfo_beta.txt")
+    inst_file_ch   = channel.fromPath("${params.metadata_folder_path}/instinfo_beta.txt")
+    gene_file_ch   = channel.fromPath("${params.metadata_folder_path}/geneinfo_beta.txt")
+    gctx_cp_ch     = channel.fromPath(params.gctx_cp_path)
+    gctx_ctl_ch    = channel.fromPath(params.gctx_ctl_path)
+    
+    loadCompoundMetadata(comp_file_ch)
+    loadInstanceMetadata(inst_file_ch)
+    
+    addFingerprints(loadCompoundMetadata.out)
+    preprocessMetadata(loadInstanceMetadata.out)
+
+    loadExpressionData(
+        addFingerprints.out,
+        preprocessMetadata.out,
+        gene_file_ch, 
+        gctx_cp_ch,
+        gctx_ctl_ch
+    )
 
     publish:
-    first_output = sayHello.out
-    uppercased = convertToUpper.out
-    collected = collectGreetings.out.outfile
-    batch_report = collectGreetings.out.report
-    cowpy_art = cowpy.out
+
+    fingerprints_out = addFingerprints.out
+    metadata_out     = preprocessMetadata.out
+    expression_out   = loadExpressionData.out
 }
 
+// 6. Direct the streams to their explicit destination paths on your Mac
 output {
-    first_output {
-        path {"${params.batch}/intermediates/${sayHello.name}"}
+    fingerprints_out {
+        path "${params.batch}/intermediates"
     }
-    uppercased {
-        path {"${params.batch}/intermediates/${convertToUpper.name}"}
+    metadata_out {
+        path "${params.batch}/intermediates"
     }
-    collected {
-        path {"${params.batch}/${collectGreetings.name}"}
-    }
-    batch_report {
-        path {"${params.batch}/${collectGreetings.name}"}
-    }
-    cowpy_art {
-        path {"${params.batch}/${cowpy.name}"}
-    }
+
+    expression_out {
+       path "${params.batch}/intermediates"
+      }
+    
+
 }

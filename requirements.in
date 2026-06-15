@@ -11,3 +11,5 @@ pyarrow # work with LINCS
 fastparquet # wort with LINCS
 scanpy
 pytest # unit testing 
+nextflow
+openjdk=17

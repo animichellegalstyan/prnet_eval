@@ -1,39 +1,15 @@
 import anndata as ad
+import numpy as np
 import pandas as pd
 import scanpy as sc
+import sys
+import os
 
 from preprocessing.scripts.inspect_fingerprints import get_fingerprint
 from pathlib import Path
 from pandarallel import pandarallel
 
-
-
-def preprocessing(comp_metadata_clean: pd.DataFrame, inst_metadata_clean: pd.DataFrame) -> ad.AnnData:
-    """
-    Preprocesses the cleaned data as described in PRnet. The preprocessing is the same for all HTS RNA-seq
-    datasets, depending on single-cell and bulk data.
-
-    Parameters
-    ----------
-    cleaned_data: ad.AnnData
-        AnnData object containing the data after it was cleaned (with data_clean_lincs or data_clean_sciplex) 
-    
-    Returns
-    -------
-    preprocessed_data: ad.Anndata
-        AnnData object that containes the preprocessed data. 
-    """
-    preprocessed_data = sc.pp.normalize_total(cleaned_data)
-    preprocessed_data = sc.pp.log1p(cleaned_data)
-    
-    return preprocessed_data
-    
-        
-
-
-def data_cleaning(comp_metadata: pd.DataFrame, 
-                  inst_metadata: pd.DataFrame,
-                  comp_metadata_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+def preprocess_metadata(inst_metadata: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Cleans the raw data by the criteria outlined in the PRnet paper on metadata level. This function:
     - deletes insufficient compound conditions
@@ -55,21 +31,48 @@ def data_cleaning(comp_metadata: pd.DataFrame,
         A Dataframe containing experimental metadata after cleaning data. 
     """
 
-    comp_metadata_clean = add_fingerprints(comp_metadata, comp_metadata_path)
     inst_metadata_clean = (inst_metadata
                            .pipe(adapt_cols_to_prnet)
-                           .pipe(del_insufficient_comp)
-                           .pipe(pair_observations))
+                           .pipe(del_insufficient_comp, verbose=False)
+                           .pipe(pair_observations, verbose=False))
+
+    return inst_metadata_clean
 
 
+def preprocess_expression_data(lincs_adata: ad.AnnData) -> ad.AnnData:
+    """
+    Preprocessing of expression data. Data is normalized and log1p-transformed. 
+    Expression rows totaling 0 will be excluded, as they skew computation.
 
-    inst_meta_prnet_cols = adapt_cols_to_prnet(inst_metadata)
-    inst_meta_sufficient = del_insufficient_comp(inst_meta_prnet_cols)
-    inst_metadata_clean = pair_observations(inst_meta_sufficient)
+    Parameters
+    ----------
+    lincs_adata: ad.AnnData
+        An anndata object, where obs combines the compound and instance metadata. var is the gene metadata.
+        X is the gene expression.
 
-    return comp_metadata_clean, inst_metadata_clean
+    Returns
+    -------
+    lincs_adata: ad.AnnData
+        An anndata object, where obs combines the compound and instance metadata. var is the gene metadata.
+        X is the normalized and log1p-transformed gene expression.
+    """
 
-def add_fingerprints(comp_metadata: pd.DataFrame, verbose: bool) -> pd.DataFrame:
+    row_sums_before = lincs_adata.X.sum(axis=1).A1 # sums gene expression for every row 
+    row_total = lincs_adata.X.shape[0] # total number of rows
+    num_empty_cells = np.sum(row_sums_before == 0)
+
+    print(f"Percentage of 0-filled rows: {num_empty_cells/row_total * 100}")
+
+    sc.pp.filter_cells(lincs_adata, min_counts=1)
+
+    sc.pp.normalize_total(lincs_adata)
+    sc.pp.log1p(lincs_adata)
+
+    return lincs_adata
+
+
+def add_fingerprints(comp_metadata: pd.DataFrame, 
+                     verbose: False) -> pd.DataFrame:
     """
     Assumes fingerprints have not been generated or need to be generated again 
     (compounds_info_fingerprints.parquet does not exist or is deprecated).
@@ -101,10 +104,8 @@ def add_fingerprints(comp_metadata: pd.DataFrame, verbose: bool) -> pd.DataFrame
     nrows_after = comp_metadata.shape[0]
 
     # Generate fingerprints
+    pandarallel.initialize(progress_bar=False)
     comp_metadata["fingerprint_smiles"] = comp_metadata["canonical_smiles"].parallel_apply(get_fingerprint)
-
-    # Save metdata to Parquet
-    # comp_metadata.to_parquet(comp_metadata_path, index=False)
 
     # delete na's in fingerprint_smiles column
     comp_metadata = comp_metadata.dropna(subset=['fingerprint_smiles'])
@@ -152,7 +153,7 @@ def adapt_cols_to_prnet(inst_metadata: pd.DataFrame) -> pd.DataFrame:
 
     return inst_metadata
 
-def del_insufficient_comp(inst_metadata: pd.DataFrame, verbose: bool) -> pd.DataFrame:
+def del_insufficient_comp(inst_metadata: pd.DataFrame, verbose: False) -> pd.DataFrame:
     """
     Assumes column 'cov_drug_dose_name' exists (Execute adapt_cols_to_prnet before this).
     Deletes insufficient compound conditions (observations < 5). 
@@ -189,7 +190,7 @@ def del_insufficient_comp(inst_metadata: pd.DataFrame, verbose: bool) -> pd.Data
 
     return inst_metadata.reset_index(drop=True)
 
-def pair_observations(inst_metadata: pd.DataFrame, verbose: bool) -> pd.DataFrame:
+def pair_observations(inst_metadata: pd.DataFrame, verbose: False) -> pd.DataFrame:
     """
     Pairs unperturbed and perturbed observations together depending on the cell line.
     Sample ID of the control a perturbed observation maps to is saved in 'paired_control_index'. 
@@ -237,3 +238,31 @@ def pair_observations(inst_metadata: pd.DataFrame, verbose: bool) -> pd.DataFram
 
     return inst_metadata.reset_index(drop=True)
 
+
+if __name__ == "__main__":
+
+    task = sys.argv[1]
+
+    if task == "fingerprint":
+            
+        input_file  = sys.argv[2]
+        output_file = sys.argv[3]
+
+        df_comp = pd.read_parquet(input_file)
+
+        comp_metadata_clean = add_fingerprints(df_comp, verbose=False)
+        comp_metadata_clean.to_parquet(output_file, index=False)
+
+    elif task == "preprocess":
+            
+        input_file  = sys.argv[2]
+        output_file = sys.argv[3]
+        
+        df_inst = pd.read_parquet(input_file)
+
+        inst_metadata_clean = preprocess_metadata(df_inst)
+        inst_metadata_clean.to_parquet(output_file, index=False)
+        
+    else:
+        print(f"Error: Unknown task '{task}'", file=sys.stderr)
+        sys.exit(1)
