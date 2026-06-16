@@ -37,6 +37,7 @@ def split_data(comp_adata: ad.AnnData, Split_Setting: str, verbose: bool) -> tup
     adata_val = comp_adata[valid_ids].copy()
 
     if verbose:
+        print(f"\n--- Overall Distribution for {Split_Setting} ---")
         print("Training set: ", train_set.size)
         print("Validation set: ", val_set.size)
         print("Testing set: ", test_set.size)
@@ -73,7 +74,7 @@ def split_folds(adata_train: ad.AnnData, Split_Setting: str, verbose: bool) -> a
 
     if verbose:
         for i in range(5):
-            print(f"\n--- Distribution for drug_split_{i} ---")
+            print(f"\n--- Distribution for {Split_Setting}_split_{i} ---")
             print(adata_train.obs[f"{Split_Setting}_split_{i}"].value_counts())
     
     return adata_train
@@ -100,20 +101,6 @@ if __name__ == "__main__":
     print("Splitting the dataset and preparing for 5-fold cv...")
     lincs_adata = split_data(lincs_adata_cp, split_setting, True)
     lincs_adata = split_folds(lincs_adata_cp, split_setting, True)
-
-    # Normalizing Data ----
-
-    row_sums_before = lincs_adata.X.sum(axis=1).A1 # sums gene expression for every row 
-    row_total = lincs_adata.X.shape[0] # total number of rows
-    num_empty_cells = np.sum(row_sums_before == 0)
-
-
-    print(f"Percentage of 0-filled rows: {num_empty_cells/row_total * 100}")
-    sc.pp.filter_cells(lincs_adata, min_counts=1)
-
-    print("Executing global expression normalization across the entire dataset...")
-    sc.pp.normalize_total(lincs_adata)
-    sc.pp.log1p(lincs_adata)
 
     # Output ----
     lincs_adata.write(output_path, compression="gzip")

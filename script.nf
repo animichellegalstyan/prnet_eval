@@ -1,7 +1,8 @@
 #!/usr/bin/env nextflow
 
 // Include modules
-include { loadCompoundMetadata; loadInstanceMetadata; addFingerprints; preprocessMetadata; loadExpressionData; normalizeAndSplit } from './modules/preprocessLincs.nf'
+include { loadCompoundMetadata; loadInstanceMetadata; addFingerprints; preprocessMetadata; loadExpressionData } from './modules/preprocessLincs.nf'
+include { splitData as split_smiles; splitData as split_fingerprints } from './modules/splitData.nf'
 
 /*
  * Pipeline Parameters
@@ -9,6 +10,7 @@ include { loadCompoundMetadata; loadInstanceMetadata; addFingerprints; preproces
 params {
 
     batch                : String
+    splitting_strat      : List<String>
     metadata_folder_path : Path
     gctx_cp_path         : Path
     gctx_ctl_path        : Path
@@ -40,16 +42,21 @@ workflow {
         gctx_ctl_ch
     )
 
-    normalizeAndSplit(
+    split_smiles (
         loadExpressionData.out,
-        params.splitting_strat
+        params.splitting_strat[0]
+    )
+
+    split_fingerprints (
+        split_smiles.out,
+        params.splitting_strat[1]
     )
 
     publish:
     fingerprints_out  = addFingerprints.out
     metadata_out      = preprocessMetadata.out
     expression_out    = loadExpressionData.out
-    final_dataset_out = normalizeAndSplit.out
+    final_dataset_out = split_fingerprints.out
 }
 
 output {

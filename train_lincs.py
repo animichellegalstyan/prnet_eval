@@ -33,7 +33,7 @@ if __name__ == "__main__":
         'batch_size' : 512,
         'comb_num' : 1,
         'save_dir' : './checkpoint/',
-        'n_epochs' : 10,   # default was 500
+        'n_epochs' : 3,   # default was 500
         'split_key' : args_train.split_key,
         'x_dimension' : 978,
         'hidden_layer_sizes' : [128],
@@ -57,6 +57,7 @@ if __name__ == "__main__":
 
 
     print(os.getcwd())
+    print(config_kwargs)
 
     adata = sc.read('./dataset/Lincs_L1000.h5ad')
     sc.pp.normalize_total(adata)
