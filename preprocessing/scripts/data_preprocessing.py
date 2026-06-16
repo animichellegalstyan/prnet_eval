@@ -39,38 +39,6 @@ def preprocess_metadata(inst_metadata: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
     return inst_metadata_clean
 
 
-def preprocess_expression_data(lincs_adata: ad.AnnData) -> ad.AnnData:
-    """
-    Preprocessing of expression data. Data is normalized and log1p-transformed. 
-    Expression rows totaling 0 will be excluded, as they skew computation.
-
-    Parameters
-    ----------
-    lincs_adata: ad.AnnData
-        An anndata object, where obs combines the compound and instance metadata. var is the gene metadata.
-        X is the gene expression.
-
-    Returns
-    -------
-    lincs_adata: ad.AnnData
-        An anndata object, where obs combines the compound and instance metadata. var is the gene metadata.
-        X is the normalized and log1p-transformed gene expression.
-    """
-
-    row_sums_before = lincs_adata.X.sum(axis=1).A1 # sums gene expression for every row 
-    row_total = lincs_adata.X.shape[0] # total number of rows
-    num_empty_cells = np.sum(row_sums_before == 0)
-
-    print(f"Percentage of 0-filled rows: {num_empty_cells/row_total * 100}")
-
-    sc.pp.filter_cells(lincs_adata, min_counts=1)
-
-    sc.pp.normalize_total(lincs_adata)
-    sc.pp.log1p(lincs_adata)
-
-    return lincs_adata
-
-
 def add_fingerprints(comp_metadata: pd.DataFrame, 
                      verbose: False) -> pd.DataFrame:
     """

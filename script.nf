@@ -1,21 +1,25 @@
 #!/usr/bin/env nextflow
 
 // Include modules
-include { loadCompoundMetadata; loadInstanceMetadata; addFingerprints; preprocessMetadata; loadExpressionData } from './modules/preprocessLincs.nf'
+include { loadCompoundMetadata; loadInstanceMetadata; addFingerprints; preprocessMetadata; loadExpressionData; normalizeAndSplit } from './modules/preprocessLincs.nf'
 
 /*
  * Pipeline Parameters
  */
-params.batch                = "batch_run_00"
-params.metadata_folder_path = '/Users/ani/Thesis/prnet_eval/dataset/metadata/LINCS'
-params.gctx_cp_path         = '/Users/ani/Thesis/prnet_eval/dataset/data/LINCS/level3_beta_trt_cp_n1805898x12328.gctx'
-params.gctx_ctl_path        = '/Users/ani/Thesis/prnet_eval/dataset/data/LINCS/level3_beta_ctl_n188708x12328.gctx' 
+params {
+
+    batch                : String
+    metadata_folder_path : Path
+    gctx_cp_path         : Path
+    gctx_ctl_path        : Path
+
+}
 
 workflow {
 
     main:
 
-    // 1. Initialize our entry-point data channels natively
+    // 1. Initialize entry-point data channels 
     comp_file_ch   = channel.fromPath("${params.metadata_folder_path}/compoundinfo_beta.txt")
     inst_file_ch   = channel.fromPath("${params.metadata_folder_path}/instinfo_beta.txt")
     gene_file_ch   = channel.fromPath("${params.metadata_folder_path}/geneinfo_beta.txt")
@@ -36,14 +40,18 @@ workflow {
         gctx_ctl_ch
     )
 
-    publish:
+    normalizeAndSplit(
+        loadExpressionData.out,
+        params.splitting_strat
+    )
 
-    fingerprints_out = addFingerprints.out
-    metadata_out     = preprocessMetadata.out
-    expression_out   = loadExpressionData.out
+    publish:
+    fingerprints_out  = addFingerprints.out
+    metadata_out      = preprocessMetadata.out
+    expression_out    = loadExpressionData.out
+    final_dataset_out = normalizeAndSplit.out
 }
 
-// 6. Direct the streams to their explicit destination paths on your Mac
 output {
     fingerprints_out {
         path "${params.batch}/intermediates"
@@ -54,7 +62,11 @@ output {
 
     expression_out {
        path "${params.batch}/intermediates"
-      }
+    }
+    
+    final_dataset_out { 
+        path "${params.batch}/intermediates" 
+    }
     
 
 }

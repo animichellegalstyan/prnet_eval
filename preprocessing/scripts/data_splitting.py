@@ -1,4 +1,7 @@
 import anndata as ad
+import numpy as np
+import scanpy as sc
+import sys
 
 from enum import StrEnum
 from sklearn.model_selection import GroupShuffleSplit, GroupKFold
@@ -9,9 +12,9 @@ class SplittingStrategy(StrEnum):
     EMBEDDING_SPLIT = "fingerprint_smiles"
 
 # split_strat is set in python script for now, later will make it selectable from the command line. 
-Split_Setting = str(SplittingStrategy.COMPOUND_SPLIT_SMILES)
+#Split_Setting = str(SplittingStrategy.COMPOUND_SPLIT_SMILES)
 
-def split_data(comp_adata: ad.AnnData, verbose: bool) -> tuple[ad.AnnData, ad.AnnData, ad.AnnData]:
+def split_data(comp_adata: ad.AnnData, Split_Setting: str, verbose: bool) -> tuple[ad.AnnData, ad.AnnData, ad.AnnData]:
     # Split into train / test / val
     train_ratio = 0.6
     validation_ratio = 0.2
@@ -40,7 +43,7 @@ def split_data(comp_adata: ad.AnnData, verbose: bool) -> tuple[ad.AnnData, ad.An
     
     return adata_train, adata_val, adata_test
 
-def split_folds(adata_train: ad.AnnData, verbose: bool) -> ad.AnnData:
+def split_folds(adata_train: ad.AnnData, Split_Setting: str, verbose: bool) -> ad.AnnData:
 
     group_5fold_1 = GroupKFold(n_splits=5)
     group_5fold_2 = GroupShuffleSplit(n_splits=1, train_size=0.75, random_state=42)
@@ -50,7 +53,7 @@ def split_folds(adata_train: ad.AnnData, verbose: bool) -> ad.AnnData:
     for fold, (train_and_val_folds, test_folds) in enumerate(
     group_5fold_1.split(adata_train, groups=main_groups)
     ):
-        column_name = f"drug_split_{fold}"
+        column_name = f"{Split_Setting}_split_{fold}"
 
         adata_train.obs[column_name] = "train"
 
@@ -71,6 +74,47 @@ def split_folds(adata_train: ad.AnnData, verbose: bool) -> ad.AnnData:
     if verbose:
         for i in range(5):
             print(f"\n--- Distribution for drug_split_{i} ---")
-            print(adata_train.obs[f"drug_split_{i}"].value_counts())
+            print(adata_train.obs[f"{Split_Setting}_split_{i}"].value_counts())
     
     return adata_train
+
+
+if __name__ == "__main__":
+
+    # Input ----
+    strategy_input = sys.argv[1]
+    lincs_adata_path = sys.argv[2]
+    output_path = sys.argv[3]
+
+    try:
+        split_setting = SplittingStrategy(strategy_input)
+    except ValueError:
+        valid_options = [e.value for e in SplittingStrategy]
+        print(f"Error: Invalid strategy '{strategy_input}'. Valid options: {valid_options}", file=sys.stderr)
+        sys.exit(1)
+
+    lincs_adata = sc.read_h5ad(lincs_adata_path)
+    lincs_adata_cp = lincs_adata[lincs_adata.obs['control'] == 0].copy()
+
+    # Data Spliting ----
+    print("Splitting the dataset and preparing for 5-fold cv...")
+    lincs_adata = split_data(lincs_adata_cp, split_setting, True)
+    lincs_adata = split_folds(lincs_adata_cp, split_setting, True)
+
+    # Normalizing Data ----
+
+    row_sums_before = lincs_adata.X.sum(axis=1).A1 # sums gene expression for every row 
+    row_total = lincs_adata.X.shape[0] # total number of rows
+    num_empty_cells = np.sum(row_sums_before == 0)
+
+
+    print(f"Percentage of 0-filled rows: {num_empty_cells/row_total * 100}")
+    sc.pp.filter_cells(lincs_adata, min_counts=1)
+
+    print("Executing global expression normalization across the entire dataset...")
+    sc.pp.normalize_total(lincs_adata)
+    sc.pp.log1p(lincs_adata)
+
+    # Output ----
+    lincs_adata.write(output_path, compression="gzip")
+
