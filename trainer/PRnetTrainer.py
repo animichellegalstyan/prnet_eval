@@ -22,7 +22,6 @@ from anndata import AnnData
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import r2_score, mean_squared_error
 
-
 from data.Dataset import  DrugDoseAnnDataset
 from models.PRnet import PRnet
 
@@ -165,6 +164,7 @@ class PRnetTrainer:
         self.epoch = -1  # epoch = self.epoch + 1 in compute metrics
         self.best_state_dictPGM = None
 
+        os.makedirs(self.model_save_dir, exist_ok=True)
 
         self.PGM_losses = []
         self.r2_score_mean = []
@@ -175,7 +175,6 @@ class PRnetTrainer:
         self.mse_score_de = []
         self.best_mse = np.inf
         self.patient = 0
-
 
 
     def train(self, n_epochs = 100, lr = 0.001, weight_decay= 1e-8, scheduler_factor=0.5,scheduler_patience=10,**extras_kwargs):

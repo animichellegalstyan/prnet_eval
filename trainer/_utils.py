@@ -38,8 +38,17 @@ def train_valid_test(adata: AnnData, split_key = 'cov_drug_dose_name_split'):
     train_index = adata.obs[adata.obs[split_key]=='train'].index.tolist()
     valid_index = adata.obs[adata.obs[split_key]=='valid'].index.tolist()
     test_index = adata.obs[adata.obs[split_key]=='test'].index.tolist()
-    control_index = adata.obs[adata.obs['dose'].astype(float)==0.0].index.tolist()
+    control_index = adata.obs[adata.obs['control'].astype(float)==1].index.tolist()
 
+    # Debugging ----
+    print(
+    f"--- Data Split Overview ---\n"
+    f"Train index count:   {len(train_index)} (Samples: {train_index[:3]}...)\n"
+    f"Valid index count:   {len(valid_index)} (Samples: {valid_index[:3]}...)\n"
+    f"Test index count:    {len(test_index)} (Samples: {test_index[:3]}...)\n"
+    f"Control index count: {len(control_index)} (Samples: {control_index[:3]}...)\n"
+    f"---------------------------"
+)
     if len(train_index)>0:
         train_index = train_index + control_index
         train_adata = shuffled[train_index, :]

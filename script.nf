@@ -2,7 +2,8 @@
 
 // Include modules
 include { loadCompoundMetadata; loadInstanceMetadata; addFingerprints; preprocessMetadata; loadExpressionData } from './modules/preprocessLincs.nf'
-include { splitData as split_smiles; splitData as split_fingerprints } from './modules/splitData.nf'
+include { splitData } from './modules/splitData.nf'
+include { training } from './modules/trainPRnet.nf'
 
 /*
  * Pipeline Parameters
@@ -10,7 +11,9 @@ include { splitData as split_smiles; splitData as split_fingerprints } from './m
 params {
 
     batch                : String
-    splitting_strat      : List<String>
+    splitting_strats      : List<String>
+    split_key            : String
+    smoke_test           : Boolean 
     metadata_folder_path : Path
     gctx_cp_path         : Path
     gctx_ctl_path        : Path
@@ -42,21 +45,25 @@ workflow {
         gctx_ctl_ch
     )
 
-    split_smiles (
+    splitData (
         loadExpressionData.out,
-        params.splitting_strat[0]
+        params.splitting_strats
     )
 
-    split_fingerprints (
-        split_smiles.out,
-        params.splitting_strat[1]
+    training (
+        splitData.out,
+        params.split_key,
+        params.smoke_test
     )
 
     publish:
-    fingerprints_out  = addFingerprints.out
-    metadata_out      = preprocessMetadata.out
-    expression_out    = loadExpressionData.out
-    final_dataset_out = split_fingerprints.out
+    fingerprints_out      = addFingerprints.out
+    metadata_out          = preprocessMetadata.out
+    expression_out        = loadExpressionData.out
+    final_dataset_out     = splitData.out
+
+    training_loss_out     = training.out.training_loss
+    training_metrics_out  = training.out.training_metrics
 }
 
 output {
@@ -74,6 +81,13 @@ output {
     final_dataset_out { 
         path "${params.batch}/intermediates" 
     }
-    
 
+    training_loss_out {
+        path "${params.batch}/training"
+    }
+
+    training_metrics_out {
+        path "${params.batch}/training"
+    }
+    
 }
