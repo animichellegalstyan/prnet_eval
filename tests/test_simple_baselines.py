@@ -8,8 +8,11 @@ import anndata as ad
 from models.simple_baselines import (  # Replace 'code_file' with the name of your script file
     compute_technical_duplicate,
     td_gt_split,
-    technical_duplicate
+    technical_duplicate, 
+    simple_metrics_mean_bl,
+    simple_metrics_td
 )
+from sklearn.metrics import r2_score, mean_squared_error
 
 @pytest.fixture
 def mock_anndata():
@@ -90,3 +93,63 @@ def test_compute_technical_duplicate_pipeline(mock_anndata):
     # Verify the nested dictionary structure holds NumPy arrays
     assert isinstance(mu_td, dict)
     assert isinstance(mu_td["pert_A"], np.ndarray)
+
+def test_simple_metrics_mean_bl(mock_anndata):
+    """Tests the mean baseline metrics calculation against a known manual calculation."""
+    # 1. Setup mock mean baseline vector (length 5 for 5 genes)
+    mock_mean_baseline = np.array([2.0, 1.5, 2.5, 2.0, 1.0])
+    
+    # 2. Pick test compounds from the mock data
+    test_compounds = ["pert_A", "pert_B"]
+    
+    # 3. Manually compute the expected output to verify accuracy
+    expected_r2_scores = []
+    expected_mse_scores = []
+    
+    for pert in test_compounds:
+        actual_matrix = mock_anndata[mock_anndata.obs["pert_id"] == pert].X
+        yt_m = np.asarray(np.mean(actual_matrix, axis=0)).squeeze()
+        yp_m = mock_mean_baseline
+        
+        expected_r2_scores.append(r2_score(yt_m, yp_m))
+        expected_mse_scores.append(mean_squared_error(yt_m, yp_m))
+        
+    expected_r2 = np.mean(expected_r2_scores)
+    expected_mse = np.mean(expected_mse_scores)
+    
+    # 4. Run your function
+    res_r2, res_mse = simple_metrics_mean_bl(mock_mean_baseline, test_compounds, mock_anndata)
+    
+    # 5. Assert equality up to a small floating-point tolerance
+    assert np.isclose(res_r2, expected_r2)
+    assert np.isclose(res_mse, expected_mse)
+
+
+def test_simple_metrics_td():
+    """Tests the technical duplicate metrics computation with explicit dummy dictionary profiles."""
+    # Create mock dictionary profiles for 2 perturbations over 3 genes
+    td_profile = {
+        "pert_A": np.array([2.0, 3.0, 1.0]),
+        "pert_B": np.array([1.5, 2.5, 3.5])
+    }
+    
+    gt_profile = {
+        "pert_A": np.array([2.1, 2.9, 1.2]),
+        "pert_B": np.array([1.4, 2.6, 3.2])
+    }
+    
+    # Manually compute expected results
+    r2_A = r2_score(gt_profile["pert_A"], td_profile["pert_A"])
+    r2_B = r2_score(gt_profile["pert_B"], td_profile["pert_B"])
+    expected_r2 = np.mean([r2_A, r2_B])
+    
+    mse_A = mean_squared_error(gt_profile["pert_A"], td_profile["pert_A"])
+    mse_B = mean_squared_error(gt_profile["pert_B"], td_profile["pert_B"])
+    expected_mse = np.mean([mse_A, mse_B])
+    
+    # Run your function
+    res_r2, res_mse = simple_metrics_td(td_profile, gt_profile)
+    
+    # Assertions
+    assert np.isclose(res_r2, expected_r2)
+    assert np.isclose(res_mse, expected_mse)

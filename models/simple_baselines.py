@@ -4,6 +4,10 @@ import scanpy as sc
 import random
 from anndata import AnnData
 
+# for simple metrics
+from scipy.stats import pearsonr, spearmanr
+from sklearn.metrics import r2_score, mean_squared_error
+
 def control_baseline(adata: AnnData) -> np.ndarray:
     """
     Calculate mean expression per gene across unperturbed control cells.
@@ -152,7 +156,7 @@ def technical_duplicate(adata: ad.AnnData, td_set : dict[str,list[str]], gt_set 
     
     return td_avg_profile, gt_avg_profile
 
-def compute_technical_duplicate(adata_split: ad.AnnData, split_name: str, mode: str = "train"):
+def compute_technical_duplicate(adata_split: ad.AnnData, split_name: str, mode: str = "test"):
 
     mode_data = adata_split[adata_split.obs[split_name] == mode]
     perturbations = mode_data.obs["pert_id"].unique()
@@ -162,3 +166,43 @@ def compute_technical_duplicate(adata_split: ad.AnnData, split_name: str, mode: 
     technical_duplicate_profile, ground_truth_profile = technical_duplicate(mode_data, technical_duplicate_set, ground_truth_set)
 
     return technical_duplicate_profile, ground_truth_profile
+
+def simple_metrics_mean_bl(mean_baseline: np.ndarray[np.float64], test_compounds: list[str], adata_test: ad.AnnData) -> tuple[np.float64, np.float64]:
+
+    r2_scores_mean_baseline = []
+    mse_scores_mean_baseline = []
+
+    for pert in test_compounds:
+
+        # Ground Truth: The actual mean profile of this compound in the test set
+        actual_test_matrix = adata_test[adata_test.obs["pert_id"] == pert].X
+        yt_m = np.asarray(np.mean(actual_test_matrix, axis=0)).squeeze()
+        
+        # Prediction: The static baseline vector calculated from the training set
+        yp_m = mean_baseline 
+        
+        r2_scores_mean_baseline.append(r2_score(yt_m, yp_m))
+        mse_scores_mean_baseline.append(mean_squared_error(yt_m, yp_m))
+
+    # Calculate mean across all T compounds
+    mean_r2 = np.mean(r2_scores_mean_baseline)
+    mean_mse = np.mean(mse_scores_mean_baseline)
+
+    return mean_r2, mean_mse
+
+def simple_metrics_td(td_profile: dict[str, np.float64], gt_profile: dict[str, np.float64]) -> tuple[np.float64, np.float64]:
+    r2_scores_td = []
+    mse_scores_td = []
+
+    for pert in td_profile.keys():
+        yt_m = gt_profile[pert] 
+        yp_m = td_profile[pert] 
+
+        r2_scores_td.append(r2_score(yt_m, yp_m))
+        mse_scores_td.append(mean_squared_error(yt_m, yp_m))
+        
+    # Calculate mean across all T compounds
+    mean_r2 = np.mean(r2_scores_td)
+    mean_mse = np.mean(mse_scores_td)
+
+    return mean_r2, mean_mse
