@@ -5,7 +5,7 @@ dataset
 data_exploration_notebook.ipynb
 lincs_preproc_data_exploration.ipynb
 notebook.ipynb
-work/
+nextflow_work/
 preprocessing/scripts/__pycache__/
 **/__pycache__/
 *.pyc

@@ -42,7 +42,6 @@ if __name__ == "__main__":
     config_kwargs = {
         'batch_size' : 512,
         'comb_num' : 1,
-        'save_dir' : './checkpoint/',
         'n_epochs' : epochs,   # default was 500
         'split_key' : args_train.split_key,
         'x_dimension' : 978,
@@ -106,7 +105,7 @@ if __name__ == "__main__":
                                 batch_size=config_kwargs['batch_size'],
                                 comb_num=config_kwargs['comb_num'],
                                 split_key=current_split_key,
-                                model_save_dir=config_kwargs['save_dir'],
+                                model_save_dir=current_save_dir,
                                 x_dimension=config_kwargs['x_dimension'],
                                 hidden_layer_sizes=config_kwargs['hidden_layer_sizes'],
                                 z_dimension=config_kwargs['z_dimension'],
