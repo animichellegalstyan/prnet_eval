@@ -1,0 +1,81 @@
+Splitting the treated dataset and preparing for 5-fold cv...
+
+--- Distribution for canonical_smiles_split_0 ---
+canonical_smiles_split_0
+train    445715
+         187835
+test     145729
+valid    137181
+Name: count, dtype: int64
+
+--- Distribution for canonical_smiles_split_1 ---
+canonical_smiles_split_1
+train    422554
+         187835
+valid    160347
+test     145724
+Name: count, dtype: int64
+
+--- Distribution for canonical_smiles_split_2 ---
+canonical_smiles_split_2
+train    456155
+         187835
+test     145724
+valid    126746
+Name: count, dtype: int64
+
+--- Distribution for canonical_smiles_split_3 ---
+canonical_smiles_split_3
+train    442308
+         187835
+test     145724
+valid    140593
+Name: count, dtype: int64
+
+--- Distribution for canonical_smiles_split_4 ---
+canonical_smiles_split_4
+train    416771
+         187835
+valid    166130
+test     145724
+Name: count, dtype: int64
+
+--- Distribution for fingerprint_smiles_split_0 ---
+fingerprint_smiles_split_0
+train    439130
+         187835
+test     145726
+valid    143769
+Name: count, dtype: int64
+
+--- Distribution for fingerprint_smiles_split_1 ---
+fingerprint_smiles_split_1
+train    442442
+         187835
+test     145726
+valid    140457
+Name: count, dtype: int64
+
+--- Distribution for fingerprint_smiles_split_2 ---
+fingerprint_smiles_split_2
+train    441295
+         187835
+test     145726
+valid    141604
+Name: count, dtype: int64
+
+--- Distribution for fingerprint_smiles_split_3 ---
+fingerprint_smiles_split_3
+train    438592
+         187835
+test     145726
+valid    144307
+Name: count, dtype: int64
+
+--- Distribution for fingerprint_smiles_split_4 ---
+fingerprint_smiles_split_4
+train    428413
+         187835
+valid    154491
+test     145721
+Name: count, dtype: int64

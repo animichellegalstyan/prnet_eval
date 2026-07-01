@@ -50,20 +50,22 @@ workflow {
         params.splitting_strats
     )
 
-    training (
-        splitData.out,
-        params.split_key,
+    /*
+    training(
+        splitData.out, 
+        params.split_key, 
         params.smoke_test
-    )
+    )*/
 
     publish:
     fingerprints_out      = addFingerprints.out
     metadata_out          = preprocessMetadata.out
     expression_out        = loadExpressionData.out
-    final_dataset_out     = splitData.out
+    final_dataset_out     = splitData.out.preprocessed_dataset
 
-    training_loss_out     = training.out.training_loss
-    training_metrics_out  = training.out.training_metrics
+    //training_loss_out     = training.out.training_loss
+    //training_metrics_out  = training.out.training_metrics
+
 }
 
 output {
@@ -82,12 +84,13 @@ output {
         path "${params.batch}/intermediates" 
     }
 
+    /*
     training_loss_out {
         path "${params.batch}/training"
     }
 
     training_metrics_out {
         path "${params.batch}/training"
-    }
+    }*/
     
 }
