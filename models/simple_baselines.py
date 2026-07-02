@@ -5,7 +5,6 @@ import random
 from anndata import AnnData
 
 # for simple metrics
-from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import r2_score, mean_squared_error
 
 def control_baseline(adata: AnnData) -> np.ndarray:
@@ -34,8 +33,8 @@ def control_baseline(adata: AnnData) -> np.ndarray:
 
 def mean_baseline(adata: AnnData) -> np.ndarray[np.float64]:
     """
-    Calculate the average gene expression counts for all genes for each perturbation. 
-    Then compute the mean expressions of each gene across all perturbations
+    Calculate the average gene expression for each cell line
+    Note: See how baseline changes if it is dose and time specific as well.
 
     Parameters 
     ----------
@@ -51,7 +50,7 @@ def mean_baseline(adata: AnnData) -> np.ndarray[np.float64]:
     mu_all : np.ndarray[np.float64]
         The mean baseline of norm_data for a specified layer
     """
-    aggregated_adata = sc.get.aggregate(adata, by="pert_id", func="mean")
+    aggregated_adata = sc.get.aggregate(adata, by="cell_type", func="mean")
 
     mu_all = np.mean(aggregated_adata.X, axis=0)
 
