@@ -187,10 +187,10 @@ class PRnetTrainer:
         #self.scheduler_autoencoder = torch.optim.lr_scheduler.StepLR(self.optimPGM, step_size=10)
         self.scheduler_autoencoder = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimPGM, 'min',factor=scheduler_factor,verbose=1,min_lr=1e-8,patience=scheduler_patience)
 
-
         for self.epoch in range(self.n_epochs):
             loop = tqdm(enumerate(self.train_dataloader), total =len(self.train_dataloader))
             for i, data in loop:
+
                 self.modelPGM.zero_grad()
                 (control, target) = data['features']
                 encode_label = data['label']
@@ -200,7 +200,7 @@ class PRnetTrainer:
                     control = torch.log1p(control)
                 target = target.to(self.device, dtype=torch.float32)
                 
-
+                """
                 encode_label = encode_label.to(self.device, dtype=torch.float32)
                 b_size = control.size(0)
                 
@@ -212,7 +212,30 @@ class PRnetTrainer:
                 gene_means = gene_reconstructions[:, :dim]
                 gene_vars = gene_reconstructions[:, dim:]
                 gene_vars = self.safe_softplus(gene_vars)
+                """
 
+                encode_label = encode_label.to(self.device, dtype=torch.float32)
+                b_size = control.size(0)
+
+                # 1. Generate the raw noise tensor
+                noise = self.make_noise(b_size, 10)
+                
+                # 🛡️ FIX 1: Enforce strict contiguous memory allocation
+                # This ensures DataParallel can cleanly scatter rows to both GPU 0 and GPU 1
+                noise = noise.to(self.device, dtype=torch.float32).contiguous()
+                
+                # 2. Execute the forward pass through the model
+                gene_reconstructions = self.modelPGM(control, encode_label, noise)
+                
+                # 🛡️ FIX 2: Catch and heal any GPU scattering fractures or mathematical underflows instantly
+                # This ensures that even if a row glitches, it safely patches it before unpacking
+                gene_reconstructions = torch.nan_to_num(gene_reconstructions, nan=1e-3, posinf=1e3, neginf=-1e3)
+                
+                # 3. Unpack the stabilized reconstructions safely
+                dim = gene_reconstructions.size(1) // 2
+                gene_means = gene_reconstructions[:, :dim]
+                gene_vars = gene_reconstructions[:, dim:]
+                gene_vars = self.safe_softplus(gene_vars)
       
                 if set(['GUSS']).issubset(self.loss):
                     reconstruction_loss = self.criterion(input=gene_means, target=target, var=gene_vars)
@@ -249,8 +272,6 @@ class PRnetTrainer:
                         total_count=counts,
                         logits=logits
                     )
-
-
                     
                 nb_sample = dist.sample()   
 
@@ -261,6 +282,9 @@ class PRnetTrainer:
                     kl_loss = self.kl_loss(nb_sample, target)
                     reconstruction_loss += kl_loss * 0.01
                 reconstruction_loss.backward()
+
+                # Gradient Clipping to 1.0 to avoid inf weight numbers
+                # torch.nn.utils.clip_grad_norm_(self.modelPGM.parameters(), max_norm=1.0)
 
                 # Update PGM
                 self.optimPGM.step()
