@@ -5,7 +5,7 @@ import scanpy as sc
 import sys
 import os
 
-from preprocessing.scripts.inspect_fingerprints import get_fingerprint
+from preprocessing.scripts.inspect_fingerprints import get_fingerprint, analyze_fingerprint_collision
 from pathlib import Path
 from pandarallel import pandarallel
 
@@ -85,6 +85,42 @@ def add_fingerprints(comp_metadata: pd.DataFrame,
         print(f"{nrows_after - nrows_after2} rows remained unparsed by RDKit and deleted.")
 
     return comp_metadata.reset_index(drop=True)
+
+
+def del_false_duplicate_fp(comp_metadata: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
+    # A dictionary to track the verdicts of each fingerprint group
+    group_verdicts = {}
+
+    def is_valid_group(group):
+        fp = group.name # The fingerprint bitstring for this group
+        
+        if len(group) <= 1:
+            group_verdicts[fp] = "No collision"
+            return True
+        
+        # Get the sorted list of unique reasons for this cluster
+        reasons = analyze_fingerprint_collision(smiles_list=group["canonical_smiles"].tolist())
+        
+        # Save the reasons to our tracker (joined as a string if there are multiple)
+        group_verdicts[fp] = ", ".join(reasons)
+        
+        return reasons == ["True duplicates"]
+
+    # Filter out whole groups based on the logic above
+    filtered_metadata = comp_metadata.groupby("fingerprint_smiles", group_keys=False).filter(is_valid_group)
+    
+    if verbose:
+        # Map the group verdicts back to the rows of the ORIGINAL dataframe to count them accurately
+        row_reasons = comp_metadata["fingerprint_smiles"].map(group_verdicts)
+        
+        # Isolate just the rows that were dropped
+        dropped_rows = row_reasons[~comp_metadata.index.isin(filtered_metadata.index)]
+        
+        print("\n=== Drop Reason Breakdown (By Rows Affected) ===")
+        print(dropped_rows.value_counts())
+        print(f"================================================\nTotal Rows Dropped: {len(dropped_rows)}")
+
+    return filtered_metadata.copy()
 
 def adapt_cols_to_prnet(inst_metadata: pd.DataFrame) -> pd.DataFrame:
     """

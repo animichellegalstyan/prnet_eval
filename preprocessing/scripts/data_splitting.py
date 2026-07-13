@@ -56,7 +56,15 @@ def split_folds(adata_train: ad.AnnData, Split_Settings: list[str], verbose: boo
         group_5fold_2 = GroupShuffleSplit(n_splits=1, train_size=0.75, random_state=42)
 
         adata_compounds = adata_train[is_compound]
-        main_groups = adata_compounds.obs[split_key]
+        main_groups = (
+            adata_compounds.obs[split_key].astype(str) + "_" + 
+            adata_compounds.obs["pert_idose"].astype(str)
+        )
+
+        for fold, (train_and_val_folds, test_folds) in enumerate(
+        group_5fold_1.split(adata_compounds, groups=main_groups)
+        ):
+            column_name = f"{split_key}_split_{fold}"
 
         for fold, (train_and_val_folds, test_folds) in enumerate(
         group_5fold_1.split(adata_compounds, groups=main_groups)
