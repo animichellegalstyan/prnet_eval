@@ -40,37 +40,45 @@ def split_data(comp_adata: ad.AnnData, verbose: bool) -> tuple[ad.AnnData, ad.An
     
     return adata_train, adata_val, adata_test
 
-def split_folds(adata_train: ad.AnnData, verbose: bool) -> ad.AnnData:
+def split_folds(adata_train: ad.AnnData, Split_Settings: list[str], verbose: bool) -> ad.AnnData:
 
-    group_5fold_1 = GroupKFold(n_splits=5)
-    group_5fold_2 = GroupShuffleSplit(n_splits=1, train_size=0.75, random_state=42)
+    is_control = (adata_train.obs["control"].astype(int) == 1)
+    is_compound = ~is_control
 
-    main_groups = adata_train.obs[Split_Setting]
+    for split_key in Split_Settings:
+        group_5fold_1 = GroupKFold(n_splits=5)
+        group_5fold_2 = GroupShuffleSplit(n_splits=1, train_size=0.75, random_state=42)
 
-    for fold, (train_and_val_folds, test_folds) in enumerate(
-    group_5fold_1.split(adata_train, groups=main_groups)
-    ):
-        column_name = f"drug_split_{fold}"
-
-        adata_train.obs[column_name] = "train"
-
-        adata_train.obs.iloc[test_folds, adata_train.obs.columns.get_loc(column_name)] = "test"
-
-        adata_train_val_folds = adata_train[train_and_val_folds]
-
-        _, val_folds_subset_idx = next(
-            group_5fold_2.split(adata_train_val_folds, groups=adata_train_val_folds.obs["canonical_smiles"])
+        adata_compounds = adata_train[is_compound]
+        main_groups = (
+            adata_compounds.obs[split_key].astype(str) + "_" + 
+            adata_compounds.obs["pert_idose"].astype(str)
         )
 
-        # Map the relative validation positions back to the global index space
-        global_val_folds = train_and_val_folds[val_folds_subset_idx]
+        for fold, (train_and_val_folds, test_folds) in enumerate(
+        group_5fold_1.split(adata_compounds, groups=main_groups)
+        ):
+            column_name = f"{split_key}_split_{fold}"
 
-        # Assign 'valid' to those global validation rows
-        adata_train.obs.iloc[global_val_folds, adata_train.obs.columns.get_loc(column_name)] = "valid"
 
-    if verbose:
-        for i in range(5):
-            print(f"\n--- Distribution for drug_split_{i} ---")
-            print(adata_train.obs[f"drug_split_{i}"].value_counts())
+            adata_train.obs.loc[is_compound, column_name] = "train"
+            adata_train.obs.loc[is_control, column_name] = ""
+
+            test_indices_names = adata_compounds.obs.index[test_folds]
+            adata_train.obs.loc[test_indices_names, column_name] = "test"
+
+            adata_train_val_folds = adata_compounds[train_and_val_folds]
+
+            _, val_folds_subset_idx = next(
+                group_5fold_2.split(adata_train_val_folds, groups=adata_train_val_folds.obs[split_key])
+            )
+
+            val_indices_names = adata_train_val_folds.obs.index[val_folds_subset_idx]
+            adata_train.obs.loc[val_indices_names, column_name] = "valid"
+
+        if verbose:
+            for i in range(5):
+                print(f"\n--- Distribution for {split_key}_split_{i} ---")
+                print(adata_train.obs[f"{split_key}_split_{i}"].value_counts())
     
     return adata_train
