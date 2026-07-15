@@ -128,8 +128,8 @@ if __name__ == "__main__":
     print(f"FINISHED TRAINING FOR FOLD {args_train.split_key}\n")
 
     # Writing results
-    adata.write(os.path.join(current_dir, "loss_data.h5ad"))
-    adata.write(os.path.join(current_dir, "metrics_data.h5ad"))
+    adata.write(os.path.join(current_dir, f"loss_{args_train.split_key}.h5ad"))
+    adata.write(os.path.join(current_dir, f"metrics_{args_train.split_key}.h5ad"))
 
     print(f" Saving checkpoints to: {current_dir}")
 

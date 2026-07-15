@@ -88,7 +88,7 @@ class PRnetTrainer:
     
     # This function simplifies the softplus function when the device type is mps. CHECK PERFORMANCE!!!
     def safe_softplus(self, tensor): 
-        print("safe_softplus is called", flush=True)
+        #print("safe_softplus is called", flush=True)
         if tensor.device.type == 'mps':
             # Use manual stable version for Mac
             print("safe_softplus mps version is chosen", flush=True)
@@ -142,9 +142,9 @@ class PRnetTrainer:
         if self.train_data is not None:
             self.train_dataset = DrugDoseAnnDataset(self.train_data, dtype='train', obs_key=obs_key, comb_num=comb_num)     
             self.train_dataloader = torch.utils.data.DataLoader(self.train_dataset, batch_size=batch_size, shuffle=True)
-        if self.valid_data is not None:
-            self.valid_dataset = DrugDoseAnnDataset(self.valid_data, dtype='valid', obs_key=obs_key, comb_num=comb_num)
-            self.valid_dataloader = torch.utils.data.DataLoader(self.valid_dataset, batch_size=batch_size, shuffle=True)
+        #if self.valid_data is not None:
+        #    self.valid_dataset = DrugDoseAnnDataset(self.valid_data, dtype='valid', obs_key=obs_key, comb_num=comb_num)
+        #    self.valid_dataloader = torch.utils.data.DataLoader(self.valid_dataset, batch_size=batch_size, shuffle=True)
         if self.test_data is not None:
             self.test_dataset = DrugDoseAnnDataset(self.test_data, dtype='test', obs_key=obs_key, comb_num=comb_num)
             self.test_dataloader = torch.utils.data.DataLoader(self.test_dataset, batch_size=batch_size, shuffle=True)
@@ -200,7 +200,7 @@ class PRnetTrainer:
                     control = torch.log1p(control)
                 target = target.to(self.device, dtype=torch.float32)
                 
-                """
+                
                 encode_label = encode_label.to(self.device, dtype=torch.float32)
                 b_size = control.size(0)
                 
@@ -212,31 +212,13 @@ class PRnetTrainer:
                 gene_means = gene_reconstructions[:, :dim]
                 gene_vars = gene_reconstructions[:, dim:]
                 gene_vars = self.safe_softplus(gene_vars)
+                
+                """
+                gene_means = torch.nan_to_num(gene_means, nan=0.0, posinf=10.0, neginf=-10.0)
+                gene_vars = torch.nan_to_num(gene_vars, nan=1e-3, posinf=1e2, neginf=1e-3)
+                gene_vars = torch.clamp(gene_vars, min=1e-4, max=1e3)
                 """
 
-                encode_label = encode_label.to(self.device, dtype=torch.float32)
-                b_size = control.size(0)
-
-                # 1. Generate the raw noise tensor
-                noise = self.make_noise(b_size, 10)
-                
-                # 🛡️ FIX 1: Enforce strict contiguous memory allocation
-                # This ensures DataParallel can cleanly scatter rows to both GPU 0 and GPU 1
-                noise = noise.to(self.device, dtype=torch.float32).contiguous()
-                
-                # 2. Execute the forward pass through the model
-                gene_reconstructions = self.modelPGM(control, encode_label, noise)
-                
-                # 🛡️ FIX 2: Catch and heal any GPU scattering fractures or mathematical underflows instantly
-                # This ensures that even if a row glitches, it safely patches it before unpacking
-                gene_reconstructions = torch.nan_to_num(gene_reconstructions, nan=1e-3, posinf=1e3, neginf=-1e3)
-                
-                # 3. Unpack the stabilized reconstructions safely
-                dim = gene_reconstructions.size(1) // 2
-                gene_means = gene_reconstructions[:, :dim]
-                gene_vars = gene_reconstructions[:, dim:]
-                gene_vars = self.safe_softplus(gene_vars)
-      
                 if set(['GUSS']).issubset(self.loss):
                     reconstruction_loss = self.criterion(input=gene_means, target=target, var=gene_vars)
 
@@ -283,9 +265,6 @@ class PRnetTrainer:
                     reconstruction_loss += kl_loss * 0.01
                 reconstruction_loss.backward()
 
-                # Gradient Clipping to 1.0 to avoid inf weight numbers
-                # torch.nn.utils.clip_grad_norm_(self.modelPGM.parameters(), max_norm=1.0)
-
                 # Update PGM
                 self.optimPGM.step()
                 
@@ -300,7 +279,8 @@ class PRnetTrainer:
                 #loop.set_postfix(Loss_NB=nb_loss.item(), Loss_MSE=mse_loss.item())
                 loop.set_postfix(Loss=reconstruction_loss.item())
         
-
+            """
+            VALIDATION INACTIVE
             loop_v = tqdm(enumerate(self.valid_dataloader), total =len(self.valid_dataloader))
             self.r2_sum_mean = 0
             self.r2_sum_var = 0
@@ -398,7 +378,6 @@ class PRnetTrainer:
             #print('mean mse DEG of validation datastes:', self.mse_score_de[-1])
             #print('mean r2 DEG of validation datastes:', self.r2_score_mean_de[-1])  
             self.scheduler_autoencoder.step(self.mse_score[-1])                       
-
          
             if self.mse_score[-1] < self.best_mse:
                 self.patient = 0
@@ -417,17 +396,29 @@ class PRnetTrainer:
             elif self.patient <= 20:
                 self.patient += 1   
             else:
-                print("The mse of validation datastes has not improve in 20 epochs!")
+                print("The mse of validation dataset has not improve in 20 epochs!")
                 break
+            """
 
-        
+            # ADD THIS INSTEAD: Save a checkpoint at the end of every epoch (or just the final one)
+            if hasattr(self.modelPGM, 'module'):
+                state_dict = self.modelPGM.module.state_dict()
+            else:
+                state_dict = self.modelPGM.state_dict()
+            torch.save(state_dict, self.model_save_dir + self.split_key + '_latest_epoch.pt')
+
+        """
+        VALIDATION INACTIVE
         loss_dict = {'Loss_PGM': self.PGM_losses}
         metrics_dict = {'r2':self.r2_score_mean, 'mse':self.mse_score}
         loss_df = pd.DataFrame(loss_dict)
         metrics_df = pd.DataFrame(metrics_dict)
         loss_df.to_csv(self.model_save_dir+self.split_key+'loss_comb.csv')
         metrics_df.to_csv(self.model_save_dir+self.split_key+'metrics_comb.csv')
-       
+        """
+        loss_dict = {'Loss_PGM': self.PGM_losses}
+        loss_df = pd.DataFrame(loss_dict)
+        loss_df.to_csv(self.model_save_dir + self.split_key + 'loss_comb.csv')
 
     def test(self, model_path, return_dict = False):
 

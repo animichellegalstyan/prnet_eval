@@ -255,7 +255,8 @@ if __name__ == "__main__":
         df_comp = pd.read_parquet(input_file)
 
         comp_metadata_clean = add_fingerprints(df_comp, verbose=False)
-        comp_metadata_clean.to_parquet(output_file, index=False)
+        comp_metadata       = del_false_duplicate_fp(comp_metadata_clean, verbose=True)
+        comp_metadata.to_parquet(output_file, index=False)
 
     elif task == "preprocess":
             

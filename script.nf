@@ -52,13 +52,13 @@ workflow {
         loadExpressionData.out,
         params.splitting_strats
     )
- 
+
     training (
         splitData.out.preprocessed_dataset, 
         split_key_ch, 
         params.smoke_test
     )
-
+    
     publish:
     fingerprints_out      = addFingerprints.out
     metadata_out          = preprocessMetadata.out
@@ -67,6 +67,7 @@ workflow {
 
     training_loss_out     = training.out.training_loss
     training_metrics_out  = training.out.training_metrics
+    training_checkpoint_out   = training.out.checkpoints
 
 }
 
@@ -92,6 +93,10 @@ output {
     }
 
     training_metrics_out {
+        path "${params.batch}/training_${params.train_split}"
+    }
+
+    training_checkpoint_out {
         path "${params.batch}/training_${params.train_split}"
     }
     
