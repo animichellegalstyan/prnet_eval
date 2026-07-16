@@ -54,7 +54,7 @@ workflow {
     )
 
     training (
-        splitData.out.preprocessed_dataset, 
+        splitData.out.preprocessed_dataset.first(), 
         split_key_ch, 
         params.smoke_test
     )

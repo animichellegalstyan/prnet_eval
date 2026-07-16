@@ -2,7 +2,7 @@
 // updated last on: 14.07.2026
 process training {
 
-    conda '/opt/miniconda3/envs/prnet_run_env'
+    conda '/home/ani/miniconda3/envs/prnet_run_env'
 
     maxForks 1 // force sequencial run (parallel is default) 
     afterScript """
@@ -11,7 +11,6 @@ process training {
         ssh -o StrictHostKeyChecking=no \$TARGET_NODE 'rm -rf /storage/mi/galstyaa05/tmp_scratch/${split_key}'
     fi
     """
-    publishDir "/Users/ani/Thesis/prnet_eval/results/batch_run_02/training", mode: 'copy'
 
     input:
     path preprocessed_dataset

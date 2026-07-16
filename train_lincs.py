@@ -18,6 +18,7 @@ print(sys.path)
 import anndata as ad
 import argparse 
 from datetime import datetime
+import pandas as pd
 import scanpy as sc
 import torch 
 from trainer.PRnetTrainer import PRnetTrainer

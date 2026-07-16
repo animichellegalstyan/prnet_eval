@@ -213,11 +213,11 @@ class PRnetTrainer:
                 gene_vars = gene_reconstructions[:, dim:]
                 gene_vars = self.safe_softplus(gene_vars)
                 
-                """
+                
                 gene_means = torch.nan_to_num(gene_means, nan=0.0, posinf=10.0, neginf=-10.0)
                 gene_vars = torch.nan_to_num(gene_vars, nan=1e-3, posinf=1e2, neginf=1e-3)
                 gene_vars = torch.clamp(gene_vars, min=1e-4, max=1e3)
-                """
+                
 
                 if set(['GUSS']).issubset(self.loss):
                     reconstruction_loss = self.criterion(input=gene_means, target=target, var=gene_vars)

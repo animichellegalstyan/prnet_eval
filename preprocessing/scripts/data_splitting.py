@@ -48,6 +48,14 @@ def split_data(comp_adata: ad.AnnData, Split_Settings: list[str], verbose: bool)
 
 def split_folds(adata_train: ad.AnnData, Split_Settings: list[str], verbose: bool) -> ad.AnnData:
 
+    adata_train = sc.read_h5ad("loaded_dataset.h5ad")
+    adata = adata_train
+    print("Total observations (rows):", adata.n_obs)
+    print("Available columns in obs:", list(adata.obs.columns))
+
+    # 2. Check if the smile columns actually contain data
+    print(adata.obs[["canonical_smiles", "fingerprint_smiles"]].head())
+    print("NaN count in canonical_smiles:", adata.obs["canonical_smiles"].isna().sum())
     is_control = (adata_train.obs["control"].astype(int) == 1)
     is_compound = ~is_control
 
