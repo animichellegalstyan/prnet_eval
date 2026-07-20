@@ -11,7 +11,7 @@ import sys
 SCRIPT_ROOT = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_ROOT not in sys.path:
     sys.path.insert(0, SCRIPT_ROOT)
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 print(sys.path)
 
@@ -20,8 +20,13 @@ import argparse
 from datetime import datetime
 import pandas as pd
 import scanpy as sc
+import numpy as np
 import torch 
 from trainer.PRnetTrainer import PRnetTrainer
+
+print("Is CUDA available?", torch.cuda.is_available())
+print("Current device:", torch.cuda.current_device())
+print("Device name:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "None")
 
 def parse_args():
     parse = argparse.ArgumentParser(description='perturbation-conditioned generative model') 
@@ -68,6 +73,15 @@ if __name__ == "__main__":
 
     adata = sc.read(args_train.input_data)
 
+    import scipy.sparse as sp
+
+    if sp.issparse(adata.X):
+        print("Converting sparse matrix to dense array for speed...")
+        adata.X = adata.X.toarray()
+
+    # Ensure it's float32 (float64 slows down GPUs significantly)
+    adata.X = adata.X.astype('float32')
+
     # Launch smoke test ----
     """
     if args_train.smoke_test:
@@ -90,17 +104,48 @@ if __name__ == "__main__":
     sc.pp.filter_cells(adata, min_counts=0.00001)
     print(f"Shape after filtering out empty rows: {adata.shape}")
 
+    print("Min in adata.X BEFORE normalize/log1p:", adata.X.min())
+    if (adata.X < 0).any():
+        print("[FIX] Non-positive/negative values detected in raw data — zeroing out...")
+    adata.X = np.clip(adata.X, a_min=0, a_max=None)
+
     sc.pp.normalize_total(adata)
     sc.pp.log1p(adata)
+
+    print("HAS NANS IN ADATA.X:", np.isnan(adata.X).any())
+    print("MIN VALUES IN ADATA.X AFTER:", adata.X.min())
 
     # current_split_key = f"{args_train.split_key}_split_{split}"
 
     # current_save_dir = os.path.join(save_directory, f"{args_train.split_key}")
     # os.makedirs(current_save_dir, exist_ok=True)
 
+
+    """
+    # === FORCE FAST IN-MEMORY DATALOADING ===
+    print("Pre-optimizing AnnData structure for high-speed dataloading...")
+    
+    import numpy as np
+    import pandas as pd
+    
+    # 1. Force the main data matrix to sit sequentially in RAM
+    adata.X = np.ascontiguousarray(adata.X, dtype=np.float32)
+    
+    # 2. Optimize pandas metadata tables without losing columns
+    # This cleans up internal memory fragmentation from previous slicing
+    adata.obs = adata.obs.copy()
+    
+    # 3. Convert heavy object/string columns to category types for fast indexing
+    for col in adata.obs.columns:
+        if adata.obs[col].dtype == 'object':
+            adata.obs[col] = adata.obs[col].astype('category')
+            
+    # ============================================
+    """
     print(f" STARTING TRAINING FOR FOLD {args_train.split_key}")
 
-    current_dir = os.getcwd()
+    # Ensure current_dir ends with os.sep so string concatenation in PRnetTrainer doesn't mangle folder names
+    current_dir = os.path.abspath(os.getcwd()) + os.sep
     Trainer = PRnetTrainer(
                             adata,
                             batch_size=config_kwargs['batch_size'],
@@ -127,12 +172,6 @@ if __name__ == "__main__":
         scheduler_patience=config_kwargs['scheduler_patience'])
         
     print(f"FINISHED TRAINING FOR FOLD {args_train.split_key}\n")
-
-    # Writing results
-    adata.write(os.path.join(current_dir, f"loss_{args_train.split_key}.h5ad"))
-    adata.write(os.path.join(current_dir, f"metrics_{args_train.split_key}.h5ad"))
-
-    print(f" Saving checkpoints to: {current_dir}")
 
     # Duration stats
     end_time = datetime.now()

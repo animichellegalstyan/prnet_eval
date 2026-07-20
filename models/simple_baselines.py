@@ -206,6 +206,21 @@ def simple_metrics_td(td_profile: dict[str, np.float64], gt_profile: dict[str, n
 
     return mean_r2, mean_mse
 
+def r2_mean(data1, data2):
+    sum_r2_1 = 0
+    for i in range(data1.shape[0]):
+        r2_score_ = r2_score(data1[i], data2[i])
+        sum_r2_1 += r2_score_           
+    return sum_r2_1/data1.shape[0]
+
+def mse_mean(data1, data2):
+    sum_mse_1 = 0
+    for i in range(data1.shape[0]):
+        mse_score_ = mean_squared_error(data1[i], data2[i])
+        sum_mse_1 += mse_score_           
+    return sum_mse_1/data1.shape[0]
+
+
 # Viusalization: Has been generated with Gemini Flash Version 3.5. 
 # Updated: 13.07.2026
 

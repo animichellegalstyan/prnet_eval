@@ -41,22 +41,22 @@ def Condition_encoder(condition_list):
               
     return onehot_encoded         
 
-def Drug_dose_encoder(drug_SMILES_list: list, dose_list: list, num_Bits=1024, comb_num=1):
+def Drug_dose_encoder(drug_fingerprints_list: list, dose_list: list, num_Bits=1024, comb_num=1):
     """
     Encode SMILES of drug to rFCFP fingerprint
     """
-    drug_len = len(drug_SMILES_list)
+    drug_len = len(drug_fingerprints_list)
     fcfp4_array = np.zeros((drug_len, num_Bits))
 
     if comb_num==1:
-        for i, smiles in enumerate(drug_SMILES_list):
-            smi = smiles
-            mol = Chem.MolFromSmiles(smi)
-            fcfp4 = AllChem.GetMorganFingerprintAsBitVect(mol, 2, useFeatures=True, nBits=num_Bits).ToBitString()
-            fcfp4_list = np.array(list(fcfp4), dtype=np.float32)
-            fcfp4_list = fcfp4_list*np.log10(dose_list[i]+1)
+        for i in range(drug_len):
+            fp_string = drug_fingerprints_list[i]
+            # Convert the character string "01011..." to a float array
+            fcfp4_list = np.array(list(fp_string), dtype=np.float32)
+            fcfp4_list = fcfp4_list * np.log10(dose_list[i] + 1)
             fcfp4_array[i] = fcfp4_list
     else:
+        """
         for i, smiles in enumerate(drug_SMILES_list):
             smiles_list = smiles.split('+')
             for smi in smiles_list:
@@ -65,6 +65,23 @@ def Drug_dose_encoder(drug_SMILES_list: list, dose_list: list, num_Bits=1024, co
                 fcfp4_list = np.array(list(fcfp4), dtype=np.float32)
                 fcfp4_list = fcfp4_list*np.log10(float(dose_list[i])+1)
                 fcfp4_array[i] += fcfp4_list
+        """
+        # For combinations, we assume your precalculated_fps already combined them, 
+        # or you are passing the pre-summed base fingerprints.
+        for i in range(drug_len):
+            fp_string = drug_fingerprints_list[i]
+            # Handle possible combined string splits if applicable, otherwise read directly
+            if '+' in str(fp_string):
+                fps = str(fp_string).split('+')
+                fcfp4_list = np.zeros(num_Bits, dtype=np.float32)
+                for fp in fps:
+                    fcfp4_list += np.array(list(fp), dtype=np.float32)
+            else:
+                fcfp4_list = np.array(list(fp_string), dtype=np.float32)
+                
+            fcfp4_list = fcfp4_list * np.log10(float(dose_list[i]) + 1)
+            fcfp4_array[i] = fcfp4_list
+
     return fcfp4_array 
 
 def Drug_SMILES_encode(drug_SMILES_list: list, num_Bits=1024):

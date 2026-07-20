@@ -74,30 +74,43 @@ workflow {
 output {
     fingerprints_out {
         path "${params.batch}/intermediates"
+        mode 'copy'
     }
 
     metadata_out {
         path "${params.batch}/intermediates"
+        mode 'copy'
+
     }
 
     expression_out {
-       path "${params.batch}/intermediates"
+        path "${params.batch}/intermediates"
+        mode 'copy'
+
     }
     
     final_dataset_out { 
         path "${params.batch}/intermediates" 
+        mode 'copy'
+
     }
 
     training_loss_out {
         path "${params.batch}/training_${params.train_split}"
+        mode 'copy'
+
     }
 
     training_metrics_out {
         path "${params.batch}/training_${params.train_split}"
+        mode 'copy'
+
     }
 
     training_checkpoint_out {
         path "${params.batch}/training_${params.train_split}"
+        mode 'copy'
+
     }
     
 }

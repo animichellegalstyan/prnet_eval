@@ -18,9 +18,9 @@ process training {
     val smoke_test
 
     output:
-    path "loss_${split_key}.h5ad", emit: training_loss
-    path "metrics_${split_key}.h5ad", emit: training_metrics
-    path "checkpoint_test", emit: checkpoints, optional: true
+    path "${split_key}loss_comb*.csv", emit: training_loss
+    path "${split_key}metrics_comb*.csv", emit: training_metrics, optional: true    
+    path "*${split_key}*", emit: checkpoints, optional: true
 
     script:
     def test_flag = smoke_test ? "--smoke_test" : ""
@@ -32,16 +32,12 @@ process training {
         echo "========================================================="
         echo "localhost" > .node_name
 
-        # Match path structure locally if you use an environment, or just run python directly
         export PYTHONPATH="${projectDir}"
         
         python -m train_lincs \
             --input_data ${preprocessed_dataset} \
             --split_key ${split_key} \
             ${test_flag}
-
-        # The python script outputs loss_data.h5ad, metrics_data.h5ad, and checkpoint_test
-        # directly into the Nextflow task execution directory.
         """
     } else {   
     """

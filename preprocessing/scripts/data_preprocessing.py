@@ -161,6 +161,7 @@ def del_insufficient_comp(inst_metadata: pd.DataFrame, verbose: False) -> pd.Dat
     """
     Assumes column 'cov_drug_dose_name' exists (Execute adapt_cols_to_prnet before this).
     Deletes insufficient compound conditions (observations < 5). 
+    Handles lack of dose information for perturbed compounds.
 
     Parameters
     ----------
@@ -189,9 +190,22 @@ def del_insufficient_comp(inst_metadata: pd.DataFrame, verbose: False) -> pd.Dat
             "Empty Dataframe. With the selected filters there are too few observations per perturbation to proceed."
     )
 
-
     inst_metadata = inst_metadata[inst_metadata['cov_drug_dose_name'].isin(observations_count_df.index)].copy()
 
+    # Handle Nan's in pert_dose
+    inst_metadata_cp = inst_metadata['control'] == 0
+
+    pert_dose_numeric = pd.to_numeric(inst_metadata.loc[inst_metadata_cp, 'pert_dose'], errors='coerce')
+    nearest_dose_numeric = pd.to_numeric(inst_metadata.loc[inst_metadata_cp, 'nearest_dose'], errors='coerce')
+
+    inst_metadata.loc[inst_metadata_cp, 'pert_dose'] = (
+        pert_dose_numeric
+        .fillna(nearest_dose_numeric)
+        .fillna(0.0)
+    )
+
+    inst_metadata['pert_dose'] = pd.to_numeric(inst_metadata['pert_dose'], errors='coerce').fillna(0.0)
+    
     return inst_metadata.reset_index(drop=True)
 
 def pair_observations(inst_metadata: pd.DataFrame, verbose: False) -> pd.DataFrame:

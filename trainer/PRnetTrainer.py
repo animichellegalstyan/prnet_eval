@@ -88,13 +88,10 @@ class PRnetTrainer:
     
     # This function simplifies the softplus function when the device type is mps. CHECK PERFORMANCE!!!
     def safe_softplus(self, tensor): 
-        #print("safe_softplus is called", flush=True)
         if tensor.device.type == 'mps':
-            # Use manual stable version for Mac
             print("safe_softplus mps version is chosen", flush=True)
             return torch.where(tensor > 20, tensor, torch.log(1 + torch.exp(tensor)))
         else:
-            # Use standard high-performance version for Linux/NVIDIA
             return F.softplus(tensor)
 
     def __init__(self, adata, batch_size = 32, comb_num = 2, shuffle = True, split_key='random_split', model_save_dir = './checkpoint/',results_save_dir = './results/', x_dimension = 5000, hidden_layer_sizes = [128], z_dimension = 64, adaptor_layer_sizes = [128], comb_dimension = 64, drug_dimension = 1031, n_genes=20,  dr_rate = 0.05, loss = ['GUSS'], obs_key = 'cov_drug_name', **kwargs): # maybe add more parameters
@@ -121,14 +118,15 @@ class PRnetTrainer:
         if self.device.type == "cuda":
             torch.cuda.manual_seed(self.seed)
             if(torch.cuda.device_count() > 1):
-                self.modelPGM = nn.DataParallel(self.modelPGM, device_ids=[i for i in range(torch.cuda.device_count())])         
+                self.modelPGM = nn.DataParallel(self.modelPGM, device_ids=[i for i in range(torch.cuda.device_count())]) 
   
  
-        #self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.modelPGM = self.modelPGM.to(self.device).float()
+        #self.device = torch.device('cuda' if self.device.type == "cuda" else 'cpu')
+        self.modelPGM = self.modelPGM.to(self.device)
 
 
         self.modelPGM.apply(self.weight_init)
+
         print(self.modelPGM)
 
 
@@ -142,9 +140,9 @@ class PRnetTrainer:
         if self.train_data is not None:
             self.train_dataset = DrugDoseAnnDataset(self.train_data, dtype='train', obs_key=obs_key, comb_num=comb_num)     
             self.train_dataloader = torch.utils.data.DataLoader(self.train_dataset, batch_size=batch_size, shuffle=True)
-        #if self.valid_data is not None:
-        #    self.valid_dataset = DrugDoseAnnDataset(self.valid_data, dtype='valid', obs_key=obs_key, comb_num=comb_num)
-        #    self.valid_dataloader = torch.utils.data.DataLoader(self.valid_dataset, batch_size=batch_size, shuffle=True)
+        if self.valid_data is not None:
+            self.valid_dataset = DrugDoseAnnDataset(self.valid_data, dtype='valid', obs_key=obs_key, comb_num=comb_num)
+            self.valid_dataloader = torch.utils.data.DataLoader(self.valid_dataset, batch_size=batch_size, shuffle=True)
         if self.test_data is not None:
             self.test_dataset = DrugDoseAnnDataset(self.test_data, dtype='test', obs_key=obs_key, comb_num=comb_num)
             self.test_dataloader = torch.utils.data.DataLoader(self.test_dataset, batch_size=batch_size, shuffle=True)
@@ -186,6 +184,9 @@ class PRnetTrainer:
             paramsPGM, lr=lr, weight_decay= weight_decay) # consider changing the param. like weight_decay, eps, etc.
         #self.scheduler_autoencoder = torch.optim.lr_scheduler.StepLR(self.optimPGM, step_size=10)
         self.scheduler_autoencoder = torch.optim.lr_scheduler.ReduceLROnPlateau(self.optimPGM, 'min',factor=scheduler_factor,verbose=1,min_lr=1e-8,patience=scheduler_patience)
+        #from datetime import datetime
+        # Turn on anomaly detection
+        torch.autograd.set_detect_anomaly(True)
 
         for self.epoch in range(self.n_epochs):
             loop = tqdm(enumerate(self.train_dataloader), total =len(self.train_dataloader))
@@ -206,18 +207,45 @@ class PRnetTrainer:
                 
 
                 noise = self.make_noise(b_size, 10)
+
+                # --- 1. PRE-FORWARD DIAGNOSTICS (Inputs & Model Weights) ---
+                if torch.isnan(control).any() or torch.isinf(control).any():
+                    raise ValueError(f"Epoch {self.epoch} Batch {i}: 'control' input tensor contains NaN/Inf!")
+                if torch.isnan(target).any() or torch.isinf(target).any():
+                    raise ValueError(f"Epoch {self.epoch} Batch {i}: 'target' input tensor contains NaN/Inf!")
+                if torch.isnan(encode_label).any() or torch.isinf(encode_label).any():
+                    nan_rows = torch.isnan(data['label']).any(dim=1)
+                    if nan_rows.any():
+                        bad_indices = torch.where(nan_rows)[0].tolist()
+                        print(f"Sample indices with NaN labels in batch: {bad_indices}")
+                        print("Data: ", data['label'])
+                        print(bad_indices)
+                    raise ValueError(f"Epoch {self.epoch} Batch {i}: 'encode_label' input tensor contains NaN/Inf!")
+
+
+                for name, param in self.modelPGM.named_parameters():
+                    if torch.isnan(param).any() or torch.isinf(param).any():
+                        raise RuntimeError(f"Epoch {self.epoch} Batch {i}: Parameter '{name}' corrupted BEFORE forward pass!")
                 
                 gene_reconstructions = self.modelPGM(control, encode_label, noise)
                 dim = gene_reconstructions.size(1) // 2
                 gene_means = gene_reconstructions[:, :dim]
                 gene_vars = gene_reconstructions[:, dim:]
                 gene_vars = self.safe_softplus(gene_vars)
+
+                # 1. Print min/max/NaN status of predicted mean and scale
+                print(f"[DEBUG GUSS] Mean - min: {gene_means.min().item():.6f}, max: {gene_means.max().item():.6f}, has_nan: {torch.isnan(gene_means).any()}")
+                print(f"[DEBUG GUSS] gene_vars: {gene_vars.min().item():.6f}, max: {gene_vars.max().item():.6f}, has_nan: {torch.isnan(gene_vars).any()}")
+
+                # 2. Check if scale drops below or equal to zero (which causes log(0) or div by 0)
+                if (gene_vars <= 0).any():
+                    print(f"[WARNING] Found {(gene_vars <= 0).sum().item()} values <= 0 in scale/std tensor!")
                 
-                
+                """
                 gene_means = torch.nan_to_num(gene_means, nan=0.0, posinf=10.0, neginf=-10.0)
                 gene_vars = torch.nan_to_num(gene_vars, nan=1e-3, posinf=1e2, neginf=1e-3)
                 gene_vars = torch.clamp(gene_vars, min=1e-4, max=1e3)
-                
+                """
 
                 if set(['GUSS']).issubset(self.loss):
                     reconstruction_loss = self.criterion(input=gene_means, target=target, var=gene_vars)
@@ -274,13 +302,12 @@ class PRnetTrainer:
                 # Save Losses for plotting later
                 self.PGM_losses.append(reconstruction_loss.item())
 
-
                 loop.set_description(f'Epoch [{self.epoch}/{self.n_epochs}] [{i}/{len(self.train_dataloader)}]')
                 #loop.set_postfix(Loss_NB=nb_loss.item(), Loss_MSE=mse_loss.item())
                 loop.set_postfix(Loss=reconstruction_loss.item())
+                #t0 = datetime.now() # <-- Reset timer for next batch
         
-            """
-            VALIDATION INACTIVE
+            
             loop_v = tqdm(enumerate(self.valid_dataloader), total =len(self.valid_dataloader))
             self.r2_sum_mean = 0
             self.r2_sum_var = 0
@@ -308,8 +335,12 @@ class PRnetTrainer:
                 gene_vars = gene_reconstructions[:, dim:]
                 gene_vars = self.safe_softplus(gene_vars)
                 
-                #print(f"gene_vars: {gene_vars.dtype}")
-                
+                """
+                gene_means = torch.nan_to_num(gene_means, nan=0.0, posinf=10.0, neginf=-10.0)
+                gene_vars = torch.nan_to_num(gene_vars, nan=1e-3, posinf=1e2, neginf=1e-3)
+                gene_vars = torch.clamp(gene_vars, min=1e-4, max=1e3)
+                """
+
                 if set(['GUSS']).issubset(self.loss):
                     reconstruction_loss = self.criterion(input=gene_means, target=target, var=gene_vars)
 
@@ -398,24 +429,23 @@ class PRnetTrainer:
             else:
                 print("The mse of validation dataset has not improve in 20 epochs!")
                 break
+            
             """
-
             # ADD THIS INSTEAD: Save a checkpoint at the end of every epoch (or just the final one)
             if hasattr(self.modelPGM, 'module'):
                 state_dict = self.modelPGM.module.state_dict()
             else:
                 state_dict = self.modelPGM.state_dict()
             torch.save(state_dict, self.model_save_dir + self.split_key + '_latest_epoch.pt')
-
-        """
-        VALIDATION INACTIVE
+            """
+        
         loss_dict = {'Loss_PGM': self.PGM_losses}
         metrics_dict = {'r2':self.r2_score_mean, 'mse':self.mse_score}
         loss_df = pd.DataFrame(loss_dict)
         metrics_df = pd.DataFrame(metrics_dict)
         loss_df.to_csv(self.model_save_dir+self.split_key+'loss_comb.csv')
         metrics_df.to_csv(self.model_save_dir+self.split_key+'metrics_comb.csv')
-        """
+
         loss_dict = {'Loss_PGM': self.PGM_losses}
         loss_df = pd.DataFrame(loss_dict)
         loss_df.to_csv(self.model_save_dir + self.split_key + 'loss_comb.csv')
