@@ -16,6 +16,7 @@ process training {
     path preprocessed_dataset
     val split_key
     val smoke_test
+    val delete_fp_duplicates
 
     output:
     path "${split_key}loss_comb*.csv", emit: training_loss

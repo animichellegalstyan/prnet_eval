@@ -165,8 +165,10 @@ class PRnetTrainer:
         os.makedirs(self.model_save_dir, exist_ok=True)
 
         self.PGM_losses = []
-        self.r2_score_mean = []
-        self.r2_score_var = []
+        self.pearsonr_mean = []
+        self.pearson_var = []
+        self.pearson_delta_mean = []
+        self.pearson_delta_var = []
         self.mse_score = []
         self.r2_score_mean_de = []
         self.r2_score_var_de = []
@@ -309,8 +311,10 @@ class PRnetTrainer:
         
             
             loop_v = tqdm(enumerate(self.valid_dataloader), total =len(self.valid_dataloader))
-            self.r2_sum_mean = 0
-            self.r2_sum_var = 0
+            self.pearson_sum_mean = 0
+            self.pearson_sum_var = 0
+            self.pearson_delta_sum_mean = 0
+            self.pearson_delta_sum_var = 0
             self.mse_sum = 0
             self.r2_sum_mean_de = 0
             self.r2_sum_var_de = 0
@@ -385,27 +389,46 @@ class PRnetTrainer:
                 y_true = target.cpu().numpy()
                 yt_m = y_true.mean(axis=0)
                 yt_v = y_true.var(axis=0)
+
+                c_true = control.cpu().numpy()
+                ctrl_m = c_true.mean(axis=0)
+                ctrl_v = c_true.var(axis=0)
+
                 
-                
-                r2_score_mean = r2_score(yt_m, yp_m)
-                self.r2_sum_mean += r2_score_mean
-                r2_score_var = r2_score(yt_v, yp_v)
-                self.r2_sum_var += r2_score_var               
+                pearsonr_mean = pearsonr(yt_m, yp_m).correlation
+                self.pearson_sum_mean += pearsonr_mean
+                pearson_var = pearsonr(yt_v, yp_v).correlation
+                self.pearson_sum_var += pearson_var  
+
+                pearson_delta_mean = 0.0 if (yp_m == ctrl_m).all() else pearsonr(x=yt_m-ctrl_m, y=yp_m-ctrl_m).correlation  
+                self.pearson_delta_sum_mean += pearson_delta_mean
+                pearson_delta_var = 0.0 if (yp_v == ctrl_v).all() else pearsonr(x=yt_v-ctrl_v, y=yp_v-ctrl_v).correlation  
+                self.pearson_delta_sum_var += pearson_delta_var         
 
                 mse_score =  mean_squared_error(y_true, nb_sample)
                 self.mse_sum += mse_score
 
                 loop_v.set_description(f'Epoch [{self.epoch}/{self.n_epochs}] [{j}/{len(self.valid_dataloader)}]')
-                loop_v.set_postfix(r2_score_mean=r2_score_mean, r2_score_var=r2_score_var, mse_score=mse_score)
+                loop_v.set_postfix(pearsonr_mean=pearsonr_mean, 
+                                   pearson_var=pearson_var, 
+                                   pearson_delta_mean=pearson_delta_mean,
+                                   pearson_delta_var=pearson_delta_var,
+                                   mse_score=mse_score)
 
 
-            self.r2_score_mean.append(self.r2_sum_mean/len(self.valid_dataloader))
-            self.r2_score_var.append(self.r2_sum_var/len(self.valid_dataloader))
+            self.pearson_delta_mean.append(self.pearson_delta_sum_mean/len(self.valid_dataloader))
+            self.pearson_delta_var.append(self.pearson_delta_sum_var/len(self.valid_dataloader))
+
+            self.pearsonr_mean.append(self.pearson_sum_mean/len(self.valid_dataloader))
+            self.pearson_var.append(self.pearson_sum_var/len(self.valid_dataloader))
+
             self.mse_score.append(self.mse_sum/len(self.valid_dataloader))
 
 
-            print('mean mse of validation datastes:', self.mse_score[-1])
-            print('mean r2 of validation datastes:', self.r2_score_mean[-1])
+            print('mean mse of validation dataset:', self.mse_score[-1])
+            print('mean pearson correlation of validation dataset:', self.pearsonr_mean[-1])
+            print('mean pearson delta correlation of validation dataset:', self.pearson_delta_mean[-1])
+
             #print('mean mse DEG of validation datastes:', self.mse_score_de[-1])
             #print('mean r2 DEG of validation datastes:', self.r2_score_mean_de[-1])  
             self.scheduler_autoencoder.step(self.mse_score[-1])                       
@@ -440,7 +463,7 @@ class PRnetTrainer:
             """
         
         loss_dict = {'Loss_PGM': self.PGM_losses}
-        metrics_dict = {'r2':self.r2_score_mean, 'mse':self.mse_score}
+        metrics_dict = {'Pearson':self.pearsonr_mean,'Pearson Delta':self.pearson_delta_mean,'MSE':self.mse_score}
         loss_df = pd.DataFrame(loss_dict)
         metrics_df = pd.DataFrame(metrics_dict)
         loss_df.to_csv(self.model_save_dir+self.split_key+'loss_comb.csv')

@@ -1,0 +1,116 @@
+#!/usr/bin/env nextflow
+
+// Include modules
+include { loadCompoundMetadata; loadInstanceMetadata; addFingerprints; preprocessMetadata; loadExpressionData; delFalseDuplicates } from './modules/preprocessLincs.nf'
+include { splitData } from './modules/splitData.nf'
+include { training } from './modules/trainPRnet.nf'
+
+/*
+ * Pipeline Parameters
+ */
+params {
+
+    batch                : String
+    splitting_strats     : List<String>
+    train_split          : String
+    smoke_test           : Boolean 
+    delete_fp_duplicates : Boolean
+
+    metadata_folder_path : Path
+    gctx_cp_path         : Path
+    gctx_ctl_path        : Path
+    split_dataset_path   : Path 
+
+}
+
+workflow {
+
+    main:
+
+        if (params.split_dataset_path) {
+
+            split_data_ch = Channel.fromPath(params.split_dataset_path)
+
+        } else {
+
+            comp_file_ch        = Channel.fromPath("${params.metadata_folder_path}/compoundinfo_beta.txt")
+            inst_file_ch        = Channel.fromPath("${params.metadata_folder_path}/instinfo_beta.txt")
+            gene_file_ch        = Channel.fromPath("${params.metadata_folder_path}/geneinfo_beta.txt")
+            gene_expr_cp_ch     = Channel.fromPath(params.gctx_cp_path)
+            gene_expr_ctl_ch    = Channel.fromPath(params.gctx_ctl_path)
+
+
+            loadCompoundMetadata(comp_file_ch)
+            loadInstanceMetadata(inst_file_ch)
+            
+            addFingerprints(loadCompoundMetadata.out)
+            preprocessMetadata(loadInstanceMetadata.out)
+
+            loadExpressionData(
+                addFingerprints.out,
+                preprocessMetadata.out,
+                gene_file_ch, 
+                gene_expr_cp_ch,
+                gene_expr_ctl_ch
+            )
+
+            splitData (
+                loadExpressionData.out,
+                params.splitting_strats
+            )
+
+            split_data_ch = splitData.out.preprocessed_dataset
+    
+        }
+
+        if (params.delete_fp_duplicates) {
+            train_data_ch = delFalseDuplicates(split_data_ch)
+        } else {
+            train_data_ch = split_data_ch
+        }
+
+        def split_key_ch = Channel.of(0..4).map { fold -> "${params.train_split}_split_${fold}" }   
+
+        training (
+            train_data_ch.first(), 
+            split_key_ch, 
+            params.smoke_test,
+            params.delete_fp_duplicates
+        )
+    
+        publish:
+
+        final_dataset_out     = params.split_dataset_path ? Channel.empty() : split_data_ch 
+        training_loss_out     = training.out.training_loss
+        training_metrics_out  = training.out.training_metrics
+        training_checkpoint_out   = training.out.checkpoints
+
+}
+
+output {
+    
+    final_dataset_out { 
+        path "${params.batch}/intermediates" 
+        mode 'copy'
+
+    }
+
+    training_loss_out {
+        path "${params.batch}/training_${params.train_split}"
+        mode 'copy'
+
+    }
+
+    training_metrics_out {
+        path "${params.batch}/training_${params.train_split}"
+        mode 'copy'
+
+    }
+
+    training_checkpoint_out {
+        path "${params.batch}/training_${params.train_split}"
+        mode 'copy'
+
+    }
+    
+}

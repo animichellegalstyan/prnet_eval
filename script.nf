@@ -14,6 +14,7 @@ params {
     splitting_strats     : List<String>
     train_split          : String
     smoke_test           : Boolean 
+    delete_fp_duplicates : Boolean
     metadata_folder_path : Path
     gctx_cp_path         : Path
     gctx_ctl_path        : Path
@@ -24,40 +25,44 @@ workflow {
 
     main:
 
-    // 1. Initialize data channels 
-    comp_file_ch        = channel.fromPath("${params.metadata_folder_path}/compoundinfo_beta.txt")
-    inst_file_ch        = channel.fromPath("${params.metadata_folder_path}/instinfo_beta.txt")
-    gene_file_ch        = channel.fromPath("${params.metadata_folder_path}/geneinfo_beta.txt")
-    gene_expr_cp_ch     = channel.fromPath(params.gctx_cp_path)
-    gene_expr_ctl_ch    = channel.fromPath(params.gctx_ctl_path)
+        // 1. Initialize data channels 
+        comp_file_ch        = Channel.fromPath("${params.metadata_folder_path}/compoundinfo_beta.txt")
+        inst_file_ch        = Channel.fromPath("${params.metadata_folder_path}/instinfo_beta.txt")
+        gene_file_ch        = Channel.fromPath("${params.metadata_folder_path}/geneinfo_beta.txt")
+        gene_expr_cp_ch     = Channel.fromPath(params.gctx_cp_path)
+        gene_expr_ctl_ch    = Channel.fromPath(params.gctx_ctl_path)
 
-    // Initialize fold-channels
-    def split_key_ch = Channel.of(0..4).map { fold -> "${params.train_split}_split_${fold}" }
+        def split_key_ch = Channel.of(0..4).map { fold -> "${params.train_split}_split_${fold}" }   
 
-    loadCompoundMetadata(comp_file_ch)
-    loadInstanceMetadata(inst_file_ch)
+        loadCompoundMetadata(comp_file_ch)
+        loadInstanceMetadata(inst_file_ch)
+        
+        addFingerprints(loadCompoundMetadata.out)
+        preprocessMetadata(loadInstanceMetadata.out)
+
+        loadExpressionData(
+            addFingerprints.out,
+            preprocessMetadata.out,
+            gene_file_ch, 
+            gene_expr_cp_ch,
+            gene_expr_ctl_ch
+        )
+
+        splitData (
+            loadExpressionData.out,
+            params.splitting_strats
+        )
+
+        training_input_ch = splitData.out.preprocessed_dataset
     
-    addFingerprints(loadCompoundMetadata.out)
-    preprocessMetadata(loadInstanceMetadata.out)
 
-    loadExpressionData(
-        addFingerprints.out,
-        preprocessMetadata.out,
-        gene_file_ch, 
-        gene_expr_cp_ch,
-        gene_expr_ctl_ch
-    )
 
-    splitData (
-        loadExpressionData.out,
-        params.splitting_strats
-    )
-
-    training (
-        splitData.out.preprocessed_dataset.first(), 
-        split_key_ch, 
-        params.smoke_test
-    )
+        training (
+            splitData.out.preprocessed_dataset.first(), 
+            split_key_ch, 
+            params.smoke_test,
+            params.delete_fp_duplicates
+        )
     
     publish:
     fingerprints_out      = addFingerprints.out

@@ -196,16 +196,18 @@ def del_insufficient_comp(inst_metadata: pd.DataFrame, verbose: False) -> pd.Dat
     inst_metadata_cp = inst_metadata['control'] == 0
 
     pert_dose_numeric = pd.to_numeric(inst_metadata.loc[inst_metadata_cp, 'pert_dose'], errors='coerce')
-    nearest_dose_numeric = pd.to_numeric(inst_metadata.loc[inst_metadata_cp, 'nearest_dose'], errors='coerce')
 
-    inst_metadata.loc[inst_metadata_cp, 'pert_dose'] = (
-        pert_dose_numeric
-        .fillna(nearest_dose_numeric)
-        .fillna(0.0)
-    )
+    no_dose_availabe = pert_dose_numeric.isna() & inst_metadata_cp
 
-    inst_metadata['pert_dose'] = pd.to_numeric(inst_metadata['pert_dose'], errors='coerce').fillna(0.0)
+    if no_dose_availabe.any():
+        n_dropped = no_dose_availabe.sum()
+        if verbose:
+            print(f"Dropped {n_dropped} non-control rows due to missing dose.")
     
+        inst_metadata = inst_metadata[~no_dose_availabe].copy()
+    
+    inst_metadata['pert_dose'] = pd.to_numeric(inst_metadata['pert_dose'], errors='coerce').fillna(0.0)
+
     return inst_metadata.reset_index(drop=True)
 
 def pair_observations(inst_metadata: pd.DataFrame, verbose: False) -> pd.DataFrame:
@@ -269,8 +271,7 @@ if __name__ == "__main__":
         df_comp = pd.read_parquet(input_file)
 
         comp_metadata_clean = add_fingerprints(df_comp, verbose=False)
-        comp_metadata       = del_false_duplicate_fp(comp_metadata_clean, verbose=True)
-        comp_metadata.to_parquet(output_file, index=False)
+        comp_metadata_clean.to_parquet(output_file, index=False)
 
     elif task == "preprocess":
             
@@ -281,6 +282,16 @@ if __name__ == "__main__":
 
         inst_metadata_clean = preprocess_metadata(df_inst)
         inst_metadata_clean.to_parquet(output_file, index=False)
+    
+    elif task == "delete_false_fp_duplicates":
+                    
+        input_file  = sys.argv[2]
+        output_file = sys.argv[3]
+
+        df_split = sc.read_h5ad(input_file)
+
+        filtered_obs = del_false_duplicate_fp(df_split.obs, verbose=True)
+        df_split = df_split[filtered_obs.index].copy()
         
     else:
         print(f"Error: Unknown task '{task}'", file=sys.stderr)

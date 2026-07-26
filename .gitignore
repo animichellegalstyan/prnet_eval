@@ -10,3 +10,7 @@ nextflow_work/
 preprocessing/scripts/__pycache__/
 **/__pycache__/
 *.pyc
+/home/ani/Documents/uni/prnet_eval/results/batch_run_00
+/home/ani/Documents/uni/prnet_eval/results/batch_run_01
+/home/ani/Documents/uni/prnet_eval/results/batch_run_02
+

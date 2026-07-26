@@ -45,6 +45,21 @@ process addFingerprints {
     """
 }
 
+process delFalseDuplicates {
+
+    input:
+    path split_data
+
+    output:
+    path "split_data.h5ad"
+
+    script:
+    """
+    export PYTHONPATH="${projectDir}"
+    python -m preprocessing.scripts.data_preprocessing delete_false_fp_duplicates ${split_data} split_data.h5ad
+    """
+}
+
 process preprocessMetadata {
 
     input:

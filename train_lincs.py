@@ -24,6 +24,7 @@ import numpy as np
 import torch 
 from trainer.PRnetTrainer import PRnetTrainer
 
+
 print("Is CUDA available?", torch.cuda.is_available())
 print("Current device:", torch.cuda.current_device())
 print("Device name:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "None")
@@ -34,6 +35,7 @@ def parse_args():
     parse.add_argument('--input_data', required=True, type=str, help='Path to input h5ad dataset') 
     parse.add_argument('--split_key', default='canonical_smiles_split_0', type=str, help='split key of data') 
     parse.add_argument('--smoke_test', action='store_true', help='Run a fast pipeline test with minimal data') # to test workflow without training
+    parse.add_argument('--delete_fp_duplicates', default=False, help='Set to true if wanting to delete false duplicate fingerprints.')
 
     args = parse.parse_args()  
     return args
@@ -47,7 +49,7 @@ if __name__ == "__main__":
 
     print("Split Key: ", args_train.split_key)
     config_kwargs = {
-        'batch_size' : 512, # default was 512
+        'batch_size' : 4000, # default was 512
         'comb_num' : 1,
         'n_epochs' : epochs,   # default was 500
         'split_key' : args_train.split_key,
@@ -69,7 +71,6 @@ if __name__ == "__main__":
     }  
 
     print(os.getcwd())
-    #print(config_kwargs)
 
     adata = sc.read(args_train.input_data)
 
@@ -79,34 +80,12 @@ if __name__ == "__main__":
         print("Converting sparse matrix to dense array for speed...")
         adata.X = adata.X.toarray()
 
-    # Ensure it's float32 (float64 slows down GPUs significantly)
     adata.X = adata.X.astype('float32')
 
-    # Launch smoke test ----
-    """
-    if args_train.smoke_test:
-        print("SMOKE TEST ACTIVE: Slicing data safely using index masks")
-    
-        is_control = (adata.obs['control'].astype(int) == 1)
-        compound_indices = adata.obs.index[~is_control][:1000]
-
-        required_control_barcodes = adata.obs.loc[compound_indices, 'paired_control_index'].dropna().unique()
-
-        keep_cells = list(set(compound_indices).union(set(required_control_barcodes)))
-
-        adata = adata[keep_cells].copy()
-        
-        print(f"Smoke Test Active: Keeping a total of {adata.n_obs} structurally aligned rows.")
-    """
-
-    # Exclude wells that do not show expression activity (due to experimental issues)
     print(f"Shape before empty row filtering: {adata.shape}")
     sc.pp.filter_cells(adata, min_counts=0.00001)
     print(f"Shape after filtering out empty rows: {adata.shape}")
 
-    print("Min in adata.X BEFORE normalize/log1p:", adata.X.min())
-    if (adata.X < 0).any():
-        print("[FIX] Non-positive/negative values detected in raw data — zeroing out...")
     adata.X = np.clip(adata.X, a_min=0, a_max=None)
 
     sc.pp.normalize_total(adata)
@@ -121,27 +100,6 @@ if __name__ == "__main__":
     # os.makedirs(current_save_dir, exist_ok=True)
 
 
-    """
-    # === FORCE FAST IN-MEMORY DATALOADING ===
-    print("Pre-optimizing AnnData structure for high-speed dataloading...")
-    
-    import numpy as np
-    import pandas as pd
-    
-    # 1. Force the main data matrix to sit sequentially in RAM
-    adata.X = np.ascontiguousarray(adata.X, dtype=np.float32)
-    
-    # 2. Optimize pandas metadata tables without losing columns
-    # This cleans up internal memory fragmentation from previous slicing
-    adata.obs = adata.obs.copy()
-    
-    # 3. Convert heavy object/string columns to category types for fast indexing
-    for col in adata.obs.columns:
-        if adata.obs[col].dtype == 'object':
-            adata.obs[col] = adata.obs[col].astype('category')
-            
-    # ============================================
-    """
     print(f" STARTING TRAINING FOR FOLD {args_train.split_key}")
 
     # Ensure current_dir ends with os.sep so string concatenation in PRnetTrainer doesn't mangle folder names
