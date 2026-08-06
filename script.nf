@@ -1,5 +1,5 @@
 #!/usr/bin/env nextflow
-
+// SCRIPT DEPRECATED, ONLY KEPT FOR THE TIME BEING, USE EXECUTION SCRIPT.
 // Include modules
 include { loadCompoundMetadata; loadInstanceMetadata; addFingerprints; preprocessMetadata; loadExpressionData } from './modules/preprocessLincs.nf'
 include { splitData } from './modules/splitData.nf'

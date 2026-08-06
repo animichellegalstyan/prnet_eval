@@ -2,10 +2,12 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 import scanpy as sc
+import scipy.sparse as sp
+
 import sys
 import os
 
-from preprocessing.scripts.inspect_fingerprints import get_fingerprint, analyze_fingerprint_collision
+from preprocessing.scripts.inspect_fingerprints import get_fingerprint, get_fingerprint_all, analyze_fingerprint_collision
 from pathlib import Path
 from pandarallel import pandarallel
 
@@ -39,8 +41,7 @@ def preprocess_metadata(inst_metadata: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
     return inst_metadata_clean
 
 
-def add_fingerprints(comp_metadata: pd.DataFrame, 
-                     verbose: False) -> pd.DataFrame:
+def add_fingerprints(comp_metadata: pd.DataFrame, embedding_strat: str, verbose: False) -> pd.DataFrame:
     """
     Assumes fingerprints have not been generated or need to be generated again 
     (compounds_info_fingerprints.parquet does not exist or is deprecated).
@@ -65,24 +66,37 @@ def add_fingerprints(comp_metadata: pd.DataFrame,
     comp_metadata: pd.DataFrame
         A Dataframe containing metadata on the compounds including the generated Fingerprints.
     """
+    # If there is already an embedding, it will be replaced by the new embedding strategy
+    if "fingerprint_smiles" in comp_metadata.columns:
+        comp_metadata = comp_metadata.drop(columns=["fingerprint_smiles"])
 
     # Delete na's in canonical_smiles column
-    nrows_before = comp_metadata.shape[0]
-    comp_metadata = comp_metadata.dropna(subset=['canonical_smiles'])    
-    nrows_after = comp_metadata.shape[0]
+    comp_metadata_cp = comp_metadata[comp_metadata['control'] == 0]
+
+    nrows_before = comp_metadata_cp.shape[0]
+    comp_metadata_cp = comp_metadata_cp.dropna(subset=['canonical_smiles'])    
+    nrows_after = comp_metadata_cp.shape[0]
 
     # Generate fingerprints
     pandarallel.initialize(progress_bar=False)
-    comp_metadata["fingerprint_smiles"] = comp_metadata["canonical_smiles"].parallel_apply(get_fingerprint)
+    chosen_fp = embedding_strat
+
+    # 3. Parallel apply on the canonical_smiles column
+    comp_metadata_cp[f"fingerprint_smiles"] = comp_metadata_cp["canonical_smiles"].parallel_apply(
+        get_fingerprint_all,
+        fp_type=chosen_fp,  
+    )
 
     # delete na's in fingerprint_smiles column
-    comp_metadata = comp_metadata.dropna(subset=['fingerprint_smiles'])
-    nrows_after2 = comp_metadata.shape[0]
+    comp_metadata_cp = comp_metadata_cp.dropna(subset=['fingerprint_smiles'])
+    nrows_after2 = comp_metadata_cp.shape[0]
 
     # Print information if verbose is True
     if verbose:
         print(f"{nrows_before-nrows_after} rows were deleted due to invalid SMILES.")
         print(f"{nrows_after - nrows_after2} rows remained unparsed by RDKit and deleted.")
+
+    comp_metadata = pd.concat([comp_metadata_cp, comp_metadata[comp_metadata['control'] == 1]], axis=0, ignore_index=True)
 
     return comp_metadata.reset_index(drop=True)
 
@@ -258,6 +272,44 @@ def pair_observations(inst_metadata: pd.DataFrame, verbose: False) -> pd.DataFra
 
     return inst_metadata.reset_index(drop=True)
 
+def filter_expression_data(adata: ad.AnnData, verbose: bool=True) -> ad.AnnData:
+    """
+    Filters expression data. The function should be used right after loading expression data.
+    Rows with empty expression data will be filtered out. 
+    Expression data with negative values are clipped. 
+
+    Parameters
+    ----------
+    adata: ad.AnnData
+        A Dataframe containing the expression data, experimental and genetic information.
+    verbose: bool
+        A Boolean. If true it will print out how many rows have been filtered out. 
+    Returns
+    -------
+    adata: ad.AnnData
+        A Dataframe containing all input information after filtering.
+    """
+
+    if sp.issparse(adata.X):
+        adata.X = adata.X.toarray()
+
+    adata.X = adata.X.astype('float32')
+ 
+    adata.X = np.clip(adata.X, a_min=0, a_max=None) 
+
+    shape_before = adata.shape
+
+    row_variances = np.var(adata.X, axis=1)
+    valid_mask = row_variances > 1e-8
+    
+    adata = adata[valid_mask, :].copy()
+    shape_after = adata.shape 
+
+    if verbose:
+        print(f"Shape before empty/constant row filtering: {shape_before}")
+        print(f"Shape after filtering out constant rows: {shape_after}")
+
+    return adata
 
 if __name__ == "__main__":
 
@@ -266,12 +318,29 @@ if __name__ == "__main__":
     if task == "fingerprint":
             
         input_file  = sys.argv[2]
-        output_file = sys.argv[3]
+        embedding   = sys.argv[3]
+        output_file = sys.argv[4]
 
         df_comp = pd.read_parquet(input_file)
 
-        comp_metadata_clean = add_fingerprints(df_comp, verbose=False)
-        comp_metadata_clean.to_parquet(output_file, index=False)
+        comp_metadata_clean = add_fingerprints(df_comp, embedding, verbose=False)
+        #comp_metadata_clean.to_parquet(output_file, index=False)
+
+    elif task == "update_anndata_fp":
+        input_h5ad  = sys.argv[2]
+        embedding   = sys.argv[3]
+        output_h5ad = sys.argv[4]
+
+        adata = ad.read_h5ad(input_h5ad)
+
+        obs_df = adata.obs.copy()
+        updated_obs = add_fingerprints(obs_df, embedding, verbose=False)
+
+        if len(updated_obs) < len(adata):
+            adata = adata[updated_obs.index].copy()
+            
+        adata.obs = updated_obs
+        adata.write_h5ad(output_h5ad)
 
     elif task == "preprocess":
             
@@ -282,7 +351,8 @@ if __name__ == "__main__":
 
         inst_metadata_clean = preprocess_metadata(df_inst)
         inst_metadata_clean.to_parquet(output_file, index=False)
-    
+
+
     elif task == "delete_false_fp_duplicates":
                     
         input_file  = sys.argv[2]

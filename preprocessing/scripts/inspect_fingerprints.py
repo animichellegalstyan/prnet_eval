@@ -11,6 +11,14 @@ from rdkit import Chem, RDLogger
 from rdkit.Chem import AllChem, Draw, inchi, rdFMCS, rdMolDescriptors
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.Scaffolds import MurckoScaffold
+
+from skfp.fingerprints import (
+    MAPFingerprint,
+    ERGFingerprint,
+    PhysiochemicalPropertiesFingerprint,
+    TopologicalTorsionFingerprint,
+    SECFPFingerprint
+)
 _worker_enumerator = None
 
 
@@ -322,3 +330,158 @@ def inspect_reason(
         else:
             print(30 * "-")
     print(100 * "-")
+
+# for tetsing differet fp methods
+
+from collections import defaultdict
+import pandas as pd
+import numpy as np
+
+
+
+# 1. Initialize fingerprint transformers from skfp
+fingerprint_dict = {
+    # include_chirality=True turns MAP4 into MAP4C (stereochemistry-aware)
+    "MAP4": MAPFingerprint(fp_size=1024, radius=2, include_chirality=False),
+    "MAP4C": MAPFingerprint(fp_size=1024, radius=2, include_chirality=True),
+    "erg": ERGFingerprint(),
+    "Physicochemical": PhysiochemicalPropertiesFingerprint(),
+    "Topological Torsion": TopologicalTorsionFingerprint(fp_size=1024),
+    "SECFP Fingerprint": SECFPFingerprint(fp_size=1024)
+}
+
+
+# Registry of scikit-fingerprints transformers
+FP_TRANSFORMERS = {
+    # MAP4 paper implementation (set include_chirality=True for MAP4C)
+    "map4": MAPFingerprint(fp_size=1024, radius=2, include_chirality=False),
+    "map4c": MAPFingerprint(fp_size=1024, radius=2, include_chirality=True),
+    "erg": ERGFingerprint(),
+    "physicochemical": PhysiochemicalPropertiesFingerprint(),
+    "topological_torsion": TopologicalTorsionFingerprint(fp_size=1024),
+    "SECFP": SECFPFingerprint(fp_size=1024)
+}
+
+def get_fingerprint_all(
+    representation: Union[str, List[str]],
+    fp_type: Literal[
+        "morgan",
+        "map4",
+        "map4c",
+        "erg",
+        "physicochemical",
+        "topological_torsion",
+        "SECFP"
+    ] = "morgan",
+    input_type: Literal["smiles", "inchi"] = "smiles",
+    num_bits: int = 1024,
+) -> Union[str, List[str], None]:
+    """
+    Computes fingerprint bitstrings for single or multiple SMILES/InChI inputs.
+    Delegates to get_fingerprint for 'morgan', and FP_TRANSFORMERS (skfp) for others.
+    """
+    is_single_input = isinstance(representation, str)
+    reps = [representation] if is_single_input else representation
+
+    if not reps:
+        return None
+
+    # --- 1. Call custom get_fingerprint for Morgan ---
+    if fp_type == "morgan":
+        bitstrings = [
+            get_fingerprint(r, input_type=input_type, num_bits=num_bits)
+            for r in reps
+        ]
+        return bitstrings[0] if is_single_input else bitstrings
+
+    # --- 2. Call scikit-fingerprints transformers for other types ---
+    elif fp_type in FP_TRANSFORMERS:
+        try:
+            transformer = FP_TRANSFORMERS[fp_type]
+            fp_matrix = transformer.transform(reps)
+            bitstrings = ["".join(row.astype(str)) for row in fp_matrix]
+            return bitstrings[0] if is_single_input else bitstrings
+        except Exception as e:
+            print(f"Error generating {fp_type} fingerprint: {e}")
+            return None
+    else:
+        valid_types = ["morgan"] + list(FP_TRANSFORMERS.keys())
+        raise ValueError(
+            f"Unknown fp_type '{fp_type}'. Valid options: {valid_types}"
+        )
+    
+def analyze_fingerprint_collision_all(smiles_list: List[str]) -> List[str]:
+    """
+    Analyzes a set of SMILES strings that resulted in identical fingerprints
+    and categorizes the structural reason for the collision.
+    """
+    if not smiles_list or len(smiles_list) < 2:
+        return []
+
+    reasons = set()
+    mols = [Chem.MolFromSmiles(s) for s in smiles_list]
+    
+    # Filter invalid SMILES
+    if any(m is None for m in mols):
+        return ["Invalid SMILES"]
+
+    # --- Feature Extraction ---
+    formulas = [rdMolDescriptors.CalcMolFormula(m) for m in mols]
+    skeletons = [get_scaffold_generic(m) for m in mols]
+    
+    # Map non-isomeric SMILES to their isomeric versions within the group
+    connectivity_map = defaultdict(set)
+    for m in mols:
+        non_iso = Chem.MolToSmiles(m, isomericSmiles=False)
+        iso = Chem.MolToSmiles(m, isomericSmiles=True)
+        connectivity_map[non_iso].add(iso)
+
+    # 1. Salt/Dimer Variations
+    if len(set(s.count(".") for s in smiles_list)) > 1:
+        reasons.add("Dimer/Salt Variation")
+
+    # 2. Compositional Isomers (Different Molecular Formulas)
+    if len(set(formulas)) > 1:
+        reasons.add("Compositional Isomer (Different Formula)")
+
+    # 3. Positional / Structural Isomers
+    if len(set(formulas)) == 1 and len(connectivity_map) > 1:
+        reasons.add("Structural Isomers (Positional)")
+
+    # 4. Bioisosteres
+    if len(connectivity_map) > 1 and len(set(skeletons)) == 1:
+        reasons.add("Bioisosteres (Same Skeleton)")
+
+    # 5. Stereochemistry Analysis
+    found_r_s_conflict = False
+    found_specificity_issue = False
+
+    for iso_variants in connectivity_map.values():
+        if len(iso_variants) > 1:
+            has_stereo = [("@" in s or "/" in s or "\\" in s) for s in iso_variants]
+
+            if any(has_stereo) and not all(has_stereo):
+                found_specificity_issue = True
+
+            defined_variants = [
+                s for s in iso_variants if "@" in s or "/" in s or "\\" in s
+            ]
+            if len(set(defined_variants)) > 1:
+                found_r_s_conflict = True
+
+    if found_r_s_conflict:
+        reasons.add("Stereoisomers (R/S conflict)")
+    if found_specificity_issue:
+        reasons.add("Defined vs Undefined Stereo")
+
+    # 6. Fallback Checks
+    if not reasons:
+        canonical_smiles = set(Chem.MolToSmiles(m, isomericSmiles=True) for m in mols)
+        if len(canonical_smiles) == 1:
+            reasons.add("True duplicates")
+        elif len(set(Chem.MolToSmiles(m, isomericSmiles=False) for m in mols)) > 1:
+            reasons.add("True Hash Collision (Unclassified)")
+        else:
+            reasons.add("Error in the labelling")
+
+    return sorted(list(reasons))

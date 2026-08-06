@@ -6,6 +6,7 @@ import random
 
 from anndata import AnnData
 from sklearn.model_selection import StratifiedGroupKFold, StratifiedShuffleSplit
+from typing import Dict, List
 
 
 def control_baseline(adata: AnnData, split_axis: str) -> pd.DataFrame:
@@ -71,17 +72,14 @@ def mean_baseline_fold(fold_train: AnnData, specification: str) -> pd.DataFrame:
     """
 
     aggregated_adata = sc.get.aggregate(fold_train, by=[specification, "pert_id"], func="mean")
-    print("aggregation finished")
-
 
     df_baseline = sc.get.obs_df(aggregated_adata, keys=list(aggregated_adata.var_names) + [specification], layer="mean")
 
     mean_expression_profile_df = df_baseline.groupby(specification, observed=False).mean()
-    print("Mean baseline for fold done.")
 
     return mean_expression_profile_df
 
-def mean_baseline(adata_train: AnnData, specification: str, split_axis: str):
+def mean_baseline(adata_train: AnnData, cell_line_dict: Dict[int, List[str]], specification: str, split_axis: str):
     """
     Computes mean baseline for every fold.
 
@@ -89,6 +87,9 @@ def mean_baseline(adata_train: AnnData, specification: str, split_axis: str):
     ----------
     adata_train : anndata.AnnData
         The annotated data matrix.
+    cell_line_dict:
+        A dictionary containing the number of the fold as key and a list of unique cell_line names as values. 
+        The dictionary helps to identify the cell lines which were a part of testing the model.
     specification : str
         A string decribing which attribute the mean expression profile should be specific towards. 
         Options are any attribute of adata.obs
@@ -110,11 +111,11 @@ def mean_baseline(adata_train: AnnData, specification: str, split_axis: str):
     for fold in folds:
 
         fold_train = adata_train[adata_train.obs[f'{split_axis}_split_{fold}'] == 'train']
+        fold_train = fold_train[fold_train.obs['cell_type'].isin(cell_line_dict[fold])]
+
         fold_profile = mean_baseline_fold(fold_train, specification)
 
         fold_profile['fold name'] = f'{split_axis}_split_{fold}'
-
-        print("in fold:", fold_profile['fold name'])
 
         mean_baseline_matrix.append(fold_profile)
 
@@ -126,14 +127,11 @@ def mean_baseline(adata_train: AnnData, specification: str, split_axis: str):
     return mean_expression_profile_df
 
 
-def technical_duplicate_fold(fold: AnnData) -> pd.DataFrame:
+def technical_duplicate_fold(fold: AnnData, td_split_df: pd.DataFrame, fold_name: str) -> pd.DataFrame:
 
 
     meta_list = []
     expression_list = []
-
-    td_split_df = td_split(fold_test=fold)
-    td_split_df["pert_id"] = fold.obs["pert_id"]
 
     pert_groups = td_split_df.groupby('pert_id', observed=False)
     
@@ -142,6 +140,14 @@ def technical_duplicate_fold(fold: AnnData) -> pd.DataFrame:
         gt_indices = group_df.index[group_df["ground_truth"] == 1]
         td_indices = group_df.index[group_df["technical_duplicate"] == 1]
 
+        
+        # td_split_df has filtered out nans
+        """
+        gt_indices = gt_indices.intersection(fold.obs.index)
+        td_indices = td_indices.intersection(fold.obs.index)
+        """
+        print("gt_index", gt_indices)
+        
         gt_avg_expression_profile = np.ravel(fold[gt_indices, :].X.mean(axis=0))
         td_avg_expression_profile = np.ravel(fold[td_indices, :].X.mean(axis=0))
 
@@ -159,16 +165,18 @@ def technical_duplicate_fold(fold: AnnData) -> pd.DataFrame:
     return td_baseline_df
 
 
-def technical_duplicate_baseline(adata: AnnData, split_type: str, split_axis: str) -> pd.DataFrame:
+def technical_duplicate_baseline(adata_dict: Dict[int, AnnData], td_split_df: pd.DataFrame, split_type: str, split_axis: str) -> pd.DataFrame:
 
     folds = range(0,5)
     technical_duplicate_matrix = []
 
     for fold in folds:
+        adata = adata_dict[fold]
 
         split_name = f'{split_axis}_split_{fold}'
-        fold_split = adata[adata.obs[split_name] == f'{split_type}']
-        fold_profile = technical_duplicate_fold(fold=fold_split)
+        td_split_df_fold = td_split_df[td_split_df['fold'] == fold]
+        
+        fold_profile = technical_duplicate_fold(fold=adata, td_split_df=td_split_df_fold, fold_name=split_name)
 
         fold_profile['fold name'] = f'{split_axis}_split_{fold}'
 
@@ -179,7 +187,7 @@ def technical_duplicate_baseline(adata: AnnData, split_type: str, split_axis: st
     return technical_duplicate_df
 
 
-def td_split(fold_test: ad.AnnData, td_size: float=0.20) -> pd.DataFrame:
+def td_split(fold_test: ad.AnnData, fold_name: str, td_size: float=0.20) -> pd.DataFrame:
     is_control = fold_test.obs["control"] == 1
     is_compound = ~is_control
     
@@ -195,6 +203,7 @@ def td_split(fold_test: ad.AnnData, td_size: float=0.20) -> pd.DataFrame:
     singletons = fold[~valid_mask]
 
     # Clear print output for singleton rows assigned to ground truth
+    """
     if len(singletons) > 0:
         singleton_info = singletons.obs[["cell_type", "pert_id"]]
         print(
@@ -204,7 +213,7 @@ def td_split(fold_test: ad.AnnData, td_size: float=0.20) -> pd.DataFrame:
         print("-" * 60)
     else:
         print("\n[INFO] No singletons found in this fold.")
-
+    """
     gt_samples = set()
     td_samples = set()
 
@@ -219,14 +228,15 @@ def td_split(fold_test: ad.AnnData, td_size: float=0.20) -> pd.DataFrame:
         td_samples.update(fold_valid.obs.index[td_idx_local])
 
     gt_samples.update(singletons.obs.index)
-
     td_split_df = pd.DataFrame(
         index=fold.obs.index,
         data={
+            "sample_id": fold.obs.index,
             "cell_type": fold.obs["cell_type"],
             "pert_id": fold.obs["pert_id"],
             "ground_truth": fold.obs.index.isin(gt_samples).astype(int),
             "technical_duplicate": fold.obs.index.isin(td_samples).astype(int),
+            "fold": fold_name
         },
     )
 

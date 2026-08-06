@@ -74,32 +74,9 @@ if __name__ == "__main__":
 
     adata = sc.read(args_train.input_data)
 
-    import scipy.sparse as sp
-
-    if sp.issparse(adata.X):
-        print("Converting sparse matrix to dense array for speed...")
-        adata.X = adata.X.toarray()
-
-    adata.X = adata.X.astype('float32')
-
-    print(f"Shape before empty row filtering: {adata.shape}")
-    sc.pp.filter_cells(adata, min_counts=0.00001)
-    print(f"Shape after filtering out empty rows: {adata.shape}")
-
-    adata.X = np.clip(adata.X, a_min=0, a_max=None)
-
     sc.pp.normalize_total(adata)
     sc.pp.log1p(adata)
-
-    print("HAS NANS IN ADATA.X:", np.isnan(adata.X).any())
-    print("MIN VALUES IN ADATA.X AFTER:", adata.X.min())
-
-    # current_split_key = f"{args_train.split_key}_split_{split}"
-
-    # current_save_dir = os.path.join(save_directory, f"{args_train.split_key}")
-    # os.makedirs(current_save_dir, exist_ok=True)
-
-
+    
     print(f" STARTING TRAINING FOR FOLD {args_train.split_key}")
 
     # Ensure current_dir ends with os.sep so string concatenation in PRnetTrainer doesn't mangle folder names
@@ -137,3 +114,14 @@ if __name__ == "__main__":
     during_time = (end_time-start_time).seconds/60
 
     print(f'start time: {start_time} end_time: {end_time} time:{during_time} min')
+
+    """
+    # Fix stunlock issue when running fingerpint_split ----
+    
+    # Force flush stdout/stderr buffers
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    # Place this as the absolute LAST line of the script:
+    os._exit(0)
+    """

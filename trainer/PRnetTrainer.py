@@ -24,6 +24,8 @@ from sklearn.metrics import r2_score, mean_squared_error
 
 from data.Dataset import  DrugDoseAnnDataset
 from models.PRnet import PRnet
+from models.simple_baselines import technical_duplicate_baseline, td_split
+
 
 from ._utils import train_valid_test
 
@@ -489,16 +491,52 @@ class PRnetTrainer:
 
         loop_t = tqdm(enumerate(self.test_dataloader), total =len(self.test_dataloader))
         
+        # compute technical duplicate so that splitting information can be passed on for testing
+        fold_split = self.adata[self.adata.obs[self.split_key] == f'test']
+        tech_dup_df = td_split(fold_test=fold_split, fold_name=self.split_key)
+
+        if 'sample_id' in tech_dup_df.columns:
+            ground_truth_ids = set(tech_dup_df[tech_dup_df['ground_truth'] == 1]['sample_id'])
+        else:
+            ground_truth_ids = set(tech_dup_df[tech_dup_df['ground_truth'] == 1].index)
+
+        gt_cov_drugs = set(self.adata.obs.loc[list(ground_truth_ids), 'cov_drug_name'])
+
         for j, vdata in loop_t:
-            print("WE ARE IN THE LOOP")
             (control, target) = vdata['features']
             encode_label = vdata['label']
             data_cov_drug = vdata['cov_drug']
-            cov_drug_list = cov_drug_list + data_cov_drug
+            data_cov_control = vdata['cov_control']
 
+
+            #cov_drug_list = cov_drug_list + data_cov_drug
+
+            
+            is_gt_mask = [cov in gt_cov_drugs for cov in data_cov_drug]
+
+            # If the batch has no ground-truth samples, skip iteration
+            if not any(is_gt_mask):
+                continue
+
+            # 3. Filter Tensors to keep ONLY Ground Truth samples
+            is_gt_tensor = torch.tensor(is_gt_mask, dtype=torch.bool)
+            control = control[is_gt_tensor]
+            target = target[is_gt_tensor]
+            encode_label = encode_label[is_gt_tensor]
+
+            # 4. Filter Metadata lists to match the filtered tensors
+            data_cov_drug = [d for d, is_gt in zip(data_cov_drug, is_gt_mask) if is_gt]
+            data_cov_control = [c for c, is_gt in zip(data_cov_control, is_gt_mask) if is_gt]
+
+            cov_drug_list.extend(data_cov_drug)
+            
             with open(self.results_save_dir+self.split_key+"_cov_drug_array.csv", 'a') as f:
                 for i in data_cov_drug:
                     f.write(i+'\n')
+                for c in data_cov_control:
+                    f.write(c + '\n')
+
+            # Filter metadata lists
 
             control = control.to(self.device, dtype=torch.float32)
             if set(['NB']).issubset(self.loss):
@@ -571,6 +609,8 @@ class PRnetTrainer:
             with open(self.results_save_dir+self.split_key+"_x_true_array.csv", 'a+') as f:
                 np.savetxt(f, x_true, delimiter=",")
         
+        tech_dup_df.to_csv(self.results_save_dir + self.split_key + "_technical_duplicates.csv", index=True, index_label="sample_id")
+        
         print("Attention! The data were saved with append mode!If you want to change to overwrite mode, you can change the save mode to 'w'")
         print("The Gound Truth has been saved to:", self.results_save_dir+self.split_key+"_x_true_array.csv", 'with append mode!')
         print("The Prediction has been saved to:", self.results_save_dir+self.split_key+"_y_pre_array.csv", 'with append mode!')
@@ -578,7 +618,7 @@ class PRnetTrainer:
 
         if return_dict == True:
               
-            return x_true_array,y_true_array,y_pre_array,cov_drug_list
+            return x_true_array,y_true_array,y_pre_array,cov_drug_list, tech_dup_df
  
     @staticmethod
     def _anndataToTensor(adata: AnnData) -> torch.Tensor:

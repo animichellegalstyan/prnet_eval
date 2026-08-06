@@ -21,7 +21,7 @@ process training {
     output:
     path "${split_key}loss_comb*.csv", emit: training_loss
     path "${split_key}metrics_comb*.csv", emit: training_metrics, optional: true    
-    path "*${split_key}*", emit: checkpoints, optional: true
+    tuple val(split_key), path("${split_key}_best_epoch_all.pt"), emit: checkpoint
 
     script:
     def test_flag = smoke_test ? "--smoke_test" : ""

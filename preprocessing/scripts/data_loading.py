@@ -12,6 +12,7 @@ from cmapPy.pandasGEXpress.parse import parse # for gctx
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, FilePath, model_validator
 from scipy import sparse
+from preprocessing.scripts.data_preprocessing import filter_expression_data
 from typing import Any, Dict, List, Optional, Union
 
 # Load metadata ----
@@ -610,27 +611,14 @@ if __name__ == "__main__":
             gctx_cp_path=str(gctx_cp), 
             gctx_ctl_path=str(gctx_ctl)
         )
+        
+        # Filtering GE Data ----
+        adata = filter_expression_data(adata=lincs_adata)
 
-        # Check size of loaded and filtered expression data ----
-
-        matrix_bytes = lincs_adata.X.nbytes if hasattr(lincs_adata.X, 'nbytes') else 0
-        if matrix_bytes == 0 and hasattr(lincs_adata.X, 'data'): # If it's a sparse matrix
-            matrix_bytes = lincs_adata.X.data.nbytes + lincs_adata.X.indices.nbytes + lincs_adata.X.indptr.nbytes
-            
-        obs_bytes = lincs_adata.obs.memory_usage(deep=True).sum()
-        var_bytes = lincs_adata.var.memory_usage(deep=True).sum()
-        
-        total_gigabytes = (matrix_bytes + obs_bytes + var_bytes) / (1024 ** 3)
-        
-        print("\n" + "="*50)
-        print(f"DRY RUN COMPLETE: Preprocessing and filtering successfully finished.")
-        print(f"Estimated size of the final compiled AnnData object: {total_gigabytes:.2f} GB")
-        print("="*50 + "\n")
-        
         # Output ----
-        lincs_adata.write("loaded_dataset.h5ad", compression="gzip")
+        adata.write_h5ad("loaded_dataset.h5ad", compression="gzip")
 
-        del lincs_adata # delete from memory to save space
+        del adata # delete from memory to save space
         
     else:
         print(f"Error: Unknown task '{task}'", file=sys.stderr)

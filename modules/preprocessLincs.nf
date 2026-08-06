@@ -34,6 +34,7 @@ process addFingerprints {
 
     input:
     path comp_metadata
+    val  embedding
 
     output:
     path "fingerprinted_metadata.parquet"
@@ -41,7 +42,22 @@ process addFingerprints {
     script:
     """
     export PYTHONPATH="${projectDir}"
-    python -m preprocessing.scripts.data_preprocessing fingerprint ${comp_metadata} fingerprinted_metadata.parquet
+    python -m preprocessing.scripts.data_preprocessing fingerprint ${comp_metadata} ${embedding} fingerprinted_metadata.parquet
+    """
+}
+process updateAnnDataFingerprints {
+
+    input:
+    path h5ad_file
+    val  embedding
+
+    output:
+    path "updated_dataset.h5ad"
+
+    script:
+    """
+    export PYTHONPATH="${projectDir}"
+    python -m preprocessing.scripts.data_preprocessing update_anndata_fp ${h5ad_file} ${embedding} updated_dataset.h5ad
     """
 }
 

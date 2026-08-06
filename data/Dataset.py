@@ -80,6 +80,7 @@ class DrugDoseAnnDataset(Dataset):
             self._index_lookup_map = {name: i for i, name in enumerate(self.dense_adata_index)}
 
         # Change this line from .index() to the high-speed dictionary lookup
+        control_name = self.paired_control_index[index]
         control_index = self._index_lookup_map[self.paired_control_index[index]] 
         
 
@@ -92,6 +93,6 @@ class DrugDoseAnnDataset(Dataset):
         obs_info = self.obs_list[index]
         outputs['cov_drug'] = obs_info
         
-        return {'features':(outputs['control'], outputs['x']), 'label':outputs['label'], 'cov_drug': outputs['cov_drug']}
+        return {'features':(outputs['control'], outputs['x']), 'label':outputs['label'], 'cov_drug': outputs['cov_drug'], 'cov_control': control_name}
 
 
