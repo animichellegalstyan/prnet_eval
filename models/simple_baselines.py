@@ -142,11 +142,12 @@ def technical_duplicate_fold(fold: AnnData, td_split_df: pd.DataFrame, fold_name
 
         
         # td_split_df has filtered out nans
-        """
+        
         gt_indices = gt_indices.intersection(fold.obs.index)
         td_indices = td_indices.intersection(fold.obs.index)
-        """
-        print("gt_index", gt_indices)
+
+        if len(gt_indices) == 0 or len(td_indices) == 0:
+            continue
         
         gt_avg_expression_profile = np.ravel(fold[gt_indices, :].X.mean(axis=0))
         td_avg_expression_profile = np.ravel(fold[td_indices, :].X.mean(axis=0))
@@ -202,18 +203,6 @@ def td_split(fold_test: ad.AnnData, fold_name: str, td_size: float=0.20) -> pd.D
     
     singletons = fold[~valid_mask]
 
-    # Clear print output for singleton rows assigned to ground truth
-    """
-    if len(singletons) > 0:
-        singleton_info = singletons.obs[["cell_type", "pert_id"]]
-        print(
-            f"\n[INFO] {len(singletons)} singleton sample(s) assigned to ground truth split:"
-        )
-        print(singleton_info.to_string())
-        print("-" * 60)
-    else:
-        print("\n[INFO] No singletons found in this fold.")
-    """
     gt_samples = set()
     td_samples = set()
 

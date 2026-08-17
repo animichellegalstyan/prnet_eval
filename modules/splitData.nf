@@ -4,8 +4,6 @@
  * Split Data 
  */
 process splitData {
-
-    //publishDir "/Users/ani/Thesis/prnet_eval/results/batch_run_01/intermediates", mode: 'copy'
     
     input:
     path loaded_dataset

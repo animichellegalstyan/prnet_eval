@@ -211,25 +211,6 @@ class PRnetTrainer:
                 
 
                 noise = self.make_noise(b_size, 10)
-
-                # --- 1. PRE-FORWARD DIAGNOSTICS (Inputs & Model Weights) ---
-                if torch.isnan(control).any() or torch.isinf(control).any():
-                    raise ValueError(f"Epoch {self.epoch} Batch {i}: 'control' input tensor contains NaN/Inf!")
-                if torch.isnan(target).any() or torch.isinf(target).any():
-                    raise ValueError(f"Epoch {self.epoch} Batch {i}: 'target' input tensor contains NaN/Inf!")
-                if torch.isnan(encode_label).any() or torch.isinf(encode_label).any():
-                    nan_rows = torch.isnan(data['label']).any(dim=1)
-                    if nan_rows.any():
-                        bad_indices = torch.where(nan_rows)[0].tolist()
-                        print(f"Sample indices with NaN labels in batch: {bad_indices}")
-                        print("Data: ", data['label'])
-                        print(bad_indices)
-                    raise ValueError(f"Epoch {self.epoch} Batch {i}: 'encode_label' input tensor contains NaN/Inf!")
-
-
-                for name, param in self.modelPGM.named_parameters():
-                    if torch.isnan(param).any() or torch.isinf(param).any():
-                        raise RuntimeError(f"Epoch {self.epoch} Batch {i}: Parameter '{name}' corrupted BEFORE forward pass!")
                 
                 gene_reconstructions = self.modelPGM(control, encode_label, noise)
                 dim = gene_reconstructions.size(1) // 2
@@ -237,19 +218,6 @@ class PRnetTrainer:
                 gene_vars = gene_reconstructions[:, dim:]
                 gene_vars = self.safe_softplus(gene_vars)
 
-                # 1. Print min/max/NaN status of predicted mean and scale
-                print(f"[DEBUG GUSS] Mean - min: {gene_means.min().item():.6f}, max: {gene_means.max().item():.6f}, has_nan: {torch.isnan(gene_means).any()}")
-                print(f"[DEBUG GUSS] gene_vars: {gene_vars.min().item():.6f}, max: {gene_vars.max().item():.6f}, has_nan: {torch.isnan(gene_vars).any()}")
-
-                # 2. Check if scale drops below or equal to zero (which causes log(0) or div by 0)
-                if (gene_vars <= 0).any():
-                    print(f"[WARNING] Found {(gene_vars <= 0).sum().item()} values <= 0 in scale/std tensor!")
-                
-                """
-                gene_means = torch.nan_to_num(gene_means, nan=0.0, posinf=10.0, neginf=-10.0)
-                gene_vars = torch.nan_to_num(gene_vars, nan=1e-3, posinf=1e2, neginf=1e-3)
-                gene_vars = torch.clamp(gene_vars, min=1e-4, max=1e3)
-                """
 
                 if set(['GUSS']).issubset(self.loss):
                     reconstruction_loss = self.criterion(input=gene_means, target=target, var=gene_vars)
@@ -309,8 +277,7 @@ class PRnetTrainer:
                 loop.set_description(f'Epoch [{self.epoch}/{self.n_epochs}] [{i}/{len(self.train_dataloader)}]')
                 #loop.set_postfix(Loss_NB=nb_loss.item(), Loss_MSE=mse_loss.item())
                 loop.set_postfix(Loss=reconstruction_loss.item())
-                #t0 = datetime.now() # <-- Reset timer for next batch
-        
+
             
             loop_v = tqdm(enumerate(self.valid_dataloader), total =len(self.valid_dataloader))
             self.pearson_sum_mean = 0
@@ -440,11 +407,7 @@ class PRnetTrainer:
                 print("Saving best state of network...")
                 print("Best State was in Epoch", self.epoch)
 
-                # For mcp, which does not have DataParallel, model attr. does not exist
-                if hasattr(self.modelPGM, 'module'):
-                    self.best_state_dictG = self.modelPGM.module.state_dict()
-                else:
-                    self.best_state_dictG = self.modelPGM.state_dict()
+                self.best_state_dictG = self.modelPGM.module.state_dict()
 
                 #self.best_state_dictG = self.modelPGM.__module__.state_dict()
                 torch.save(self.best_state_dictG, self.model_save_dir+self.split_key+'_best_epoch_all.pt')
@@ -455,14 +418,6 @@ class PRnetTrainer:
                 print("The mse of validation dataset has not improve in 20 epochs!")
                 break
             
-            """
-            # ADD THIS INSTEAD: Save a checkpoint at the end of every epoch (or just the final one)
-            if hasattr(self.modelPGM, 'module'):
-                state_dict = self.modelPGM.module.state_dict()
-            else:
-                state_dict = self.modelPGM.state_dict()
-            torch.save(state_dict, self.model_save_dir + self.split_key + '_latest_epoch.pt')
-            """
         
         loss_dict = {'Loss_PGM': self.PGM_losses}
         metrics_dict = {'Pearson':self.pearsonr_mean,'Pearson Delta':self.pearson_delta_mean,'MSE':self.mse_score}
@@ -507,10 +462,6 @@ class PRnetTrainer:
             encode_label = vdata['label']
             data_cov_drug = vdata['cov_drug']
             data_cov_control = vdata['cov_control']
-
-
-            #cov_drug_list = cov_drug_list + data_cov_drug
-
             
             is_gt_mask = [cov in gt_cov_drugs for cov in data_cov_drug]
 

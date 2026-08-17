@@ -66,40 +66,29 @@ def add_fingerprints(comp_metadata: pd.DataFrame, embedding_strat: str, verbose:
     comp_metadata: pd.DataFrame
         A Dataframe containing metadata on the compounds including the generated Fingerprints.
     """
-    # If there is already an embedding, it will be replaced by the new embedding strategy
+
     if "fingerprint_smiles" in comp_metadata.columns:
         comp_metadata = comp_metadata.drop(columns=["fingerprint_smiles"])
 
-    # Delete na's in canonical_smiles column
-    comp_metadata_cp = comp_metadata[comp_metadata['control'] == 0]
+    controls = comp_metadata[comp_metadata['control'] == 1].copy()
+    compounds = comp_metadata[comp_metadata['control'] == 0].copy()
 
-    nrows_before = comp_metadata_cp.shape[0]
-    comp_metadata_cp = comp_metadata_cp.dropna(subset=['canonical_smiles'])    
-    nrows_after = comp_metadata_cp.shape[0]
-
-    # Generate fingerprints
+    compounds = compounds.dropna(subset=['canonical_smiles'])
     pandarallel.initialize(progress_bar=False)
-    chosen_fp = embedding_strat
-
-    # 3. Parallel apply on the canonical_smiles column
-    comp_metadata_cp[f"fingerprint_smiles"] = comp_metadata_cp["canonical_smiles"].parallel_apply(
-        get_fingerprint_all,
-        fp_type=chosen_fp,  
+    compounds["fingerprint_smiles"] = compounds["canonical_smiles"].parallel_apply(
+        get_fingerprint_all, fp_type=embedding_strat
     )
+    compounds = compounds.dropna(subset=['fingerprint_smiles'])
 
-    # delete na's in fingerprint_smiles column
-    comp_metadata_cp = comp_metadata_cp.dropna(subset=['fingerprint_smiles'])
-    nrows_after2 = comp_metadata_cp.shape[0]
+    controls["fingerprint_smiles"] = "CONTROL"
+    df = pd.concat([compounds, controls], axis=0)
 
-    # Print information if verbose is True
-    if verbose:
-        print(f"{nrows_before-nrows_after} rows were deleted due to invalid SMILES.")
-        print(f"{nrows_after - nrows_after2} rows remained unparsed by RDKit and deleted.")
+    if "paired_control_index" in df.columns:
+        valid_indices = set(df.index)
+        valid_mask = (df['control'] == 1) | df['paired_control_index'].isin(valid_indices)
+        df = df[valid_mask]
 
-    comp_metadata = pd.concat([comp_metadata_cp, comp_metadata[comp_metadata['control'] == 1]], axis=0, ignore_index=True)
-
-    return comp_metadata.reset_index(drop=True)
-
+    return df
 
 def del_false_duplicate_fp(comp_metadata: pd.DataFrame, verbose: bool = False) -> pd.DataFrame:
     # A dictionary to track the verdicts of each fingerprint group
@@ -249,7 +238,7 @@ def pair_observations(inst_metadata: pd.DataFrame, verbose: False) -> pd.DataFra
         matching_controls = inst_metadata[(inst_metadata.control == 1) & (inst_metadata.cell_type == cell_type)]
         
         if len(matching_controls) > 0:
-            control_idx = matching_controls['sample_id'].values[0] # PRnet always maps it to first matching control. 
+            control_idx = matching_controls['sample_id'].values[0]  
         else:
             control_idx = None  
             print(f"Warning: No control found for cell type: {cell_type}")
@@ -324,7 +313,7 @@ if __name__ == "__main__":
         df_comp = pd.read_parquet(input_file)
 
         comp_metadata_clean = add_fingerprints(df_comp, embedding, verbose=False)
-        #comp_metadata_clean.to_parquet(output_file, index=False)
+        comp_metadata_clean.to_parquet(output_file, index=False)
 
     elif task == "update_anndata_fp":
         input_h5ad  = sys.argv[2]

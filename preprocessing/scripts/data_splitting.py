@@ -9,11 +9,10 @@ from sklearn.model_selection import GroupShuffleSplit, GroupKFold, StratifiedGro
 
 class SplittingStrategy(StrEnum):
     COMPOUND_SPLIT_SMILES = "canonical_smiles"
-    COMPOUND_SPLIT_PERT_ID = "pert_id"  # just in case they actually split via pert_id
+    COMPOUND_SPLIT_PERT_ID = "pert_id"  
     EMBEDDING_SPLIT = "fingerprint_smiles"
 
-# split_strat is set in python script for now, later will make it selectable from the command line. 
-#Split_Setting = str(SplittingStrategy.COMPOUND_SPLIT_SMILES)
+
 
 def split_data(comp_adata: ad.AnnData, Split_Settings: list[str], verbose: bool) -> tuple[ad.AnnData, ad.AnnData, ad.AnnData]:
 
@@ -122,7 +121,6 @@ def split_folds_stratif(adata_train: ad.AnnData, Split_Settings: list[str], verb
             test_indices_names = adata_compounds.obs.index[test_folds]
             adata_train.obs.loc[test_indices_names, column_name] = "test"
 
-            # Inner train/val split on remaining compound folds
             adata_train_val = adata_compounds[train_and_val_folds]
             sub_strata = adata_train_val.obs["cell_type"].astype(str)
             sub_groups = adata_train_val.obs[split_key].astype(str)

@@ -18,7 +18,7 @@ process testing {
     script:
     """
     echo "========================================================="
-    echo "            RUNNING TRAINING LOCALLY                     "
+    echo "            RUNNING TESTING LOCALLY                     "
     echo "========================================================="
     echo "localhost" > .node_name
 

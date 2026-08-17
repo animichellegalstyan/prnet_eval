@@ -82,14 +82,14 @@ workflow {
         def split_key_ch = Channel.of(0..4).map { fold -> "${params.train_split}_split_${fold}" }   
 
         training (
-            processed_data_ch.first(), 
+            embedding_data_ch.first(), 
             split_key_ch, 
             params.smoke_test,
             params.delete_fp_duplicates
         )
     
         testing (
-            processed_data_ch.first(),
+            embedding_data_ch.first(),
             training.out.checkpoint,
         )
 

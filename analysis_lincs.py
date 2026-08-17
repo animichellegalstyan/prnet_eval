@@ -79,7 +79,7 @@ def control_baseline_metrics(adata: ad.AnnData, ctl_expression_profile: pd.DataF
         
 
         predicted_control_profile = ctl_expression_profile.loc[fold_num].to_numpy()
-
+        print(fold_num)
         for index, sample_id in enumerate(fold_obs.index):
             sample_expression_profile = fold_X[index].toarray().ravel()
 
@@ -161,7 +161,6 @@ def technical_duplicate_metrics(adata_dict: dict[int, ad.AnnData], technical_dup
 
         control_profile = ctl_expression_profile.loc[fold_num].to_numpy()
 
-        # 3. Build technical duplicate & ground truth lookups for this fold
         td_lookup = (
             technical_duplicate[(technical_duplicate["fold name"] == split_name) & (technical_duplicate["technical_duplicate"] == 1)]
             .set_index("pert_id")
@@ -173,10 +172,10 @@ def technical_duplicate_metrics(adata_dict: dict[int, ad.AnnData], technical_dup
             .set_index("pert_id")
             .drop(columns=["technical_duplicate", "ground_truth", "fold name", "fold"])
         )
+        
 
         valid_perts = set(td_lookup.index).intersection(gt_lookup.index)
 
-        # 4. Extract arrays once per fold (fast NumPy indexing)
         sample_ids = fold_obs.index
         pert_ids = fold_obs["pert_id"].values
 
@@ -240,9 +239,6 @@ def prnet_evaluation_metrics(ctl_profile: pd.DataFrame, all_true_df: pd.DataFram
     true_num = all_true_df.drop(columns=cols_to_drop)
     pre_num = all_pre_df.drop(columns=cols_to_drop)
 
-
-    # 2. Rename the index to 0..977
-    #ctl_profile.index = list(range(len(ctl_profile)))
 
     metrics_dict = []
     cov_drug_ids = all_true_df.index

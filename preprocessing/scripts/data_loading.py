@@ -492,13 +492,10 @@ class LINCSDataLoader(BaseModel):
 
         # Build the observables Dataframe
 
-        # 1. Subset comp_info_merge to contain pert_id's and their corresponding smiles
         comp_info_smiles = comp_info_merged[["pert_id", "canonical_smiles", "fingerprint_smiles"]]
 
-        # 2. If there are multiple pert_id's, deduplicate
         if comp_info_smiles.duplicated(subset="pert_id").any():
 
-            # Verify that no unique pert_id maps to different smiles strings/fingerprints. Mapping won't work otherwise.
             smiles_per_id = comp_info_smiles.groupby("pert_id")["canonical_smiles"].nunique()
 
             if smiles_per_id.max() > 1:
@@ -517,30 +514,18 @@ class LINCSDataLoader(BaseModel):
                 rows_after = len(comp_info_merged)
                 print(f"A number of {rows_before-rows_after} rows have been dropped due to duplicate pert_id's.")
 
-
-        
-        # 3. Merge the smiles strings from comp_info_smiles with the instance metadata to form the observables
-        
-        #control = ["ctl_x", "ctl_vehicle", "ctl_untrt", "ctl_vector"] 
-
         is_control_data = filtered_inst_metadata[filtered_inst_metadata['control'] == 1]
         if not is_control_data.empty:
-            # Use left merge to keep control data, even if they don't have smiles 
             merged_obs_df = pd.merge(left=filtered_inst_metadata, right=comp_info_smiles, how="left", on="pert_id")
         else:
-            # Use inner merge to drop profiles that actually lack smiles strings. (Due to comp_info_merged not storing them)
             merged_obs_df = pd.merge(left=filtered_inst_metadata, right=comp_info_smiles, how="inner", on="pert_id")
             
-            # Realign expression data to obs after dropping rows from obs due to inner merge
             X_data = X_data[merged_obs_df.index, :]
             
-            # Reset the metadata index after it got fragmented from inner merge
             merged_obs_df = merged_obs_df.reset_index(drop=True)
         
-        #merged_obs_df = pd.merge(left=filtered_inst_metadata, right=comp_info_smiles, how="left", on="pert_id")
-
         # Build adata object 
-        merged_obs_df = merged_obs_df.set_index(self.instance_identifier) # the index is now the sample_id
+        merged_obs_df = merged_obs_df.set_index(self.instance_identifier) 
         filtered_gene_metadata = filtered_gene_metadata.set_index("gene_id")  
 
         adata = ad.AnnData(X=X_data, obs=merged_obs_df, var=filtered_gene_metadata)

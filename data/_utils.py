@@ -44,6 +44,7 @@ def Condition_encoder(condition_list):
 def Drug_dose_encoder(drug_fingerprints_list: list, dose_list: list, num_Bits=1024, comb_num=1):
     """
     Encode SMILES of drug to rFCFP fingerprint
+    Updated to read fingerprints already generated during preprocessing, then rescale 
     """
     drug_len = len(drug_fingerprints_list)
     fcfp4_array = np.zeros((drug_len, num_Bits))
@@ -56,18 +57,6 @@ def Drug_dose_encoder(drug_fingerprints_list: list, dose_list: list, num_Bits=10
             fcfp4_list = fcfp4_list * np.log10(dose_list[i] + 1)
             fcfp4_array[i] = fcfp4_list
     else:
-        """
-        for i, smiles in enumerate(drug_SMILES_list):
-            smiles_list = smiles.split('+')
-            for smi in smiles_list:
-                mol = Chem.MolFromSmiles(smi)
-                fcfp4 = AllChem.GetMorganFingerprintAsBitVect(mol, 2, useFeatures=True, nBits=num_Bits).ToBitString()
-                fcfp4_list = np.array(list(fcfp4), dtype=np.float32)
-                fcfp4_list = fcfp4_list*np.log10(float(dose_list[i])+1)
-                fcfp4_array[i] += fcfp4_list
-        """
-        # For combinations, we assume your precalculated_fps already combined them, 
-        # or you are passing the pre-summed base fingerprints.
         for i in range(drug_len):
             fp_string = drug_fingerprints_list[i]
             # Handle possible combined string splits if applicable, otherwise read directly

@@ -99,13 +99,3 @@ if __name__ == "__main__":
 
     print(f'start time: {start_time} end_time: {end_time} time:{during_time} min')
 
-    """
-    # Fix stunlock issue when running fingerpint_split ----
-    
-    # Force flush stdout/stderr buffers
-    sys.stdout.flush()
-    sys.stderr.flush()
-
-    # Place this as the absolute LAST line of the script:
-    os._exit(0)
-    """
